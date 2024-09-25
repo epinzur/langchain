@@ -40,22 +40,14 @@ from langchain_community.utilities.cassandra import SetupMode
 from langchain_community.vectorstores.cassandra import Cassandra as CassandraVectorStore
 
 from cassio.table.mixins.metadata import MetadataMixin
-from cassio.config import check_resolve_keyspace, check_resolve_session
 
 if TYPE_CHECKING:
     from cassandra.cluster import Session
-    from cassandra.query import PreparedStatement, SimpleStatement
 
 from __future__ import annotations
 
 
 logger = logging.getLogger(__name__)
-
-ROW_ID = "row_id"
-BODY_BLOB = "body_blob"
-METADATA_BLOB = "metadata_blob"
-METADATA_S = "metadata_s"
-VECTOR = "vector"
 
 _CQL_IDENTIFIER_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9_]*")
 
@@ -108,24 +100,6 @@ def _doc_to_node(doc: Document) -> Node:
     return Node(
         id=doc.id,
         text=doc.page_content,
-        metadata=metadata,
-        links=links,
-    )
-
-def _row_to_node(row: Any) -> Node:
-    if hasattr(row, METADATA_BLOB):
-        metadata_blob = getattr(row, METADATA_BLOB)
-        metadata = _deserialize_metadata(metadata_blob)
-        links: set[Link] = _deserialize_links(metadata.get(METADATA_LINKS_KEY))
-        metadata[METADATA_LINKS_KEY] = links
-    else:
-        metadata = {}
-        links = set()
-    return Node(
-        id=getattr(row, ROW_ID, ""),
-        # TODO: figure out how to pass this through.
-        # embedding=getattr(row, VECTOR, []),
-        text=getattr(row, BODY_BLOB, ""),
         metadata=metadata,
         links=links,
     )
@@ -200,23 +174,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 deny-list option.
         """
 
-        session = check_resolve_session(session)
-        keyspace = check_resolve_keyspace(keyspace)
-
-        if not _CQL_IDENTIFIER_PATTERN.fullmatch(keyspace):
-            msg = f"Invalid keyspace: {keyspace}"
-            raise ValueError(msg)
-
-        if not _CQL_IDENTIFIER_PATTERN.fullmatch(table_name):
-            msg = f"Invalid table name: {table_name}"
-            raise ValueError(msg)
-
-        self._embedding = embedding
-        self._table_name = table_name
-        self._session = session
-        self._keyspace = keyspace
         self._metadata_deny_list = metadata_deny_list
-        self._prepared_query_cache: dict[str, PreparedStatement] = {}
 
         deny_list = list(metadata_deny_list)
         deny_list.append(METADATA_LINKS_KEY)
@@ -235,22 +193,14 @@ class CassandraGraphVectorStore(GraphVectorStore):
         self._insert_node = session.prepare(
             f"""
             INSERT INTO {keyspace}.{table_name} (
-                {ROW_ID}, {BODY_BLOB}, {VECTOR}, {METADATA_BLOB}, {METADATA_S}
+                row_id, body_blob, vector, metadata_blob, metadata_s
             ) VALUES (?, ?, ?, ?, ?)
-            """  # noqa: S608
-        )
-
-        self._query_id_and_metadata_by_id = session.prepare(
-            f"""
-            SELECT {ROW_ID}, {METADATA_BLOB}
-            FROM {keyspace}.{table_name}
-            WHERE content_id = ?
             """  # noqa: S608
         )
 
     @property
     def embeddings(self) -> Optional[Embeddings]:
-        return self._embedding
+        return self.store.embedding
 
     # TODO: Async (aadd_nodes)
     def add_nodes(
@@ -273,7 +223,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
             metadata_list.append(combined_metadata)
             incoming_links_list.append(_incoming_links(node=node))
 
-        text_embeddings = self._embedding.embed_documents(texts)
+        text_embeddings = self.store.embedding.embed_documents(texts)
 
         futures = []
         tuples = zip(node_ids, texts, text_embeddings, metadata_list, incoming_links_list)
@@ -290,7 +240,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
             metadata_blob = _serialize_metadata(metadata)
 
             futures.append(
-                self._session.execute_async(
+                self.store.session.execute_async(
                     self._insert_node,
                     parameters=(
                         node_id,
@@ -454,7 +404,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 this threshold will be chosen. Defaults to -infinity.
             metadata_filter: Optional metadata to filter the results.
         """
-        query_embedding = self._embedding.embed_query(query)
+        query_embedding = self.store.embedding.embed_query(query)
         helper = MmrHelper(
             k=k,
             query_embedding=query_embedding,
@@ -691,9 +641,8 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 await asyncio.gather(*visit_node_tasks)
 
         # Start the traversal
-        initial_embedding = self._embedding.embed_query(query)
-        initial_docs = await self.store.asimilarity_search_by_vector(
-            embedding=initial_embedding,
+        initial_docs = await self.store.asimilarity_search(
+            query=query,
             k=k,
             filter=metadata_filter,
         )
