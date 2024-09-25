@@ -1,34 +1,27 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import re
 import secrets
-import threading
+import asyncio
+
 
 from typing import (
     TYPE_CHECKING,
     Any,
-    Awaitable,
-    Callable,
     cast,
     Dict,
     Iterable,
     List,
-    Literal,
-    NamedTuple,
     Optional,
-    Protocol,
     Sequence,
+    Set,
     Tuple,
     Type,
-    TypeVar,
-    Union,
 )
 
-from dataclasses import asdict, dataclass, field, is_dataclass
-
+from dataclasses import asdict, is_dataclass
 
 from langchain_core._api import beta
 from langchain_core.documents import Document
@@ -39,6 +32,7 @@ from langchain_community.graph_vectorstores.base import (
     Link,
     Node,
     nodes_to_documents,
+    METADATA_LINKS_KEY,
 )
 from ._mmr_helper import MmrHelper
 
@@ -49,11 +43,8 @@ from cassio.table.mixins.metadata import MetadataMixin
 from cassio.config import check_resolve_keyspace, check_resolve_session
 
 if TYPE_CHECKING:
-    from cassandra.cluster import ResponseFuture, Session
+    from cassandra.cluster import Session
     from cassandra.query import PreparedStatement, SimpleStatement
-    from types import TracebackType
-
-from abc import ABC, abstractmethod
 
 from __future__ import annotations
 
@@ -64,118 +55,15 @@ ROW_ID = "row_id"
 BODY_BLOB = "body_blob"
 METADATA_BLOB = "metadata_blob"
 METADATA_S = "metadata_s"
-LINKS_METADATA_KEY = "graph_links"
 VECTOR = "vector"
 
 _CQL_IDENTIFIER_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9_]*")
 
-class _Callback(Protocol):
-    def __call__(self, rows: Sequence[Any], /) -> None: ...
-
-class ConcurrentQueries(contextlib.AbstractContextManager["ConcurrentQueries"]):
-    """Context manager for concurrent queries."""
-
-    def __init__(self, session: Session) -> None:
-        self._session = session
-        self._completion = threading.Condition()
-        self._pending = 0
-        self._error: BaseException | None = None
-
-    def _handle_result(
-        self,
-        result: Sequence[NamedTuple],
-        future: ResponseFuture,
-        callback: Callable[[Sequence[NamedTuple]], Any] | None,
-    ) -> None:
-        if callback is not None:
-            callback(result)
-
-        if future.has_more_pages:
-            future.start_fetching_next_page()
-        else:
-            with self._completion:
-                self._pending -= 1
-                if self._pending == 0:
-                    self._completion.notify()
-
-    def _handle_error(self, error: BaseException, future: ResponseFuture) -> None:
-        logger.error(
-            "Error executing query: %s",
-            future.query,
-            exc_info=error,
-        )
-        with self._completion:
-            self._error = error
-            self._completion.notify()
-
-    def execute(
-        self,
-        query: PreparedStatement | SimpleStatement,
-        parameters: tuple[Any, ...] | None = None,
-        callback: _Callback | None = None,
-        timeout: float | None = None,
-    ) -> None:
-        """Execute a query concurrently.
-
-        Because this is done concurrently, it expects a callback if you need
-        to inspect the results.
-
-        Args:
-            query: The query to execute.
-            parameters: Parameter tuple for the query. Defaults to `None`.
-            callback: Callback to apply to the results. Defaults to `None`.
-            timeout: Timeout to use (if not the session default).
-        """
-        # TODO: We could have some form of throttling, where we track the number
-        # of pending calls and queue things if it exceed some threshold.
-
-        with self._completion:
-            self._pending += 1
-            if self._error is not None:
-                return
-
-        execute_kwargs = {}
-        if timeout is not None:
-            execute_kwargs["timeout"] = timeout
-        future: ResponseFuture = self._session.execute_async(
-            query,
-            parameters,
-            **execute_kwargs,
-        )
-        future.add_callbacks(
-            self._handle_result,
-            self._handle_error,
-            callback_kwargs={
-                "future": future,
-                "callback": callback,
-            },
-            errback_kwargs={
-                "future": future,
-            },
-        )
-
-    def __exit__(
-        self,
-        _exc_type: type[BaseException] | None,
-        _exc_inst: BaseException | None,
-        _exc_traceback: TracebackType | None,
-    ) -> Literal[False]:
-        with self._completion:
-            while self._error is None and self._pending > 0:
-                self._completion.wait()
-
-        if self._error is not None:
-            raise self._error
-
-        # Don't swallow the exception.
-        # We don't need to do anything with the exception (`_exc_*` parameters)
-        # since returning false here will automatically re-raise it.
-        return False
 
 def _serialize_metadata(md: dict[str, Any]) -> str:
-    if isinstance(md.get(LINKS_METADATA_KEY), set):
+    if isinstance(md.get(METADATA_LINKS_KEY), set):
         md = md.copy()
-        md[LINKS_METADATA_KEY] = list(md[LINKS_METADATA_KEY])
+        md[METADATA_LINKS_KEY] = list(md[METADATA_LINKS_KEY])
     return json.dumps(md)
 
 
@@ -212,19 +100,31 @@ def _metadata_s_link_key(link: Link) -> str:
 def _metadata_s_link_value() -> str:
     return "link"
 
+def _doc_to_node(doc: Document) -> Node:
+    metadata = _deserialize_metadata(doc.metadata)
+    links: set[Link] = _deserialize_links(metadata.get(METADATA_LINKS_KEY))
+    metadata[METADATA_LINKS_KEY] = links
+
+    return Node(
+        id=doc.id,
+        text=doc.page_content,
+        metadata=metadata,
+        links=links,
+    )
+
 def _row_to_node(row: Any) -> Node:
     if hasattr(row, METADATA_BLOB):
         metadata_blob = getattr(row, METADATA_BLOB)
         metadata = _deserialize_metadata(metadata_blob)
-        links: set[Link] = _deserialize_links(metadata.get(LINKS_METADATA_KEY))
-        metadata[LINKS_METADATA_KEY] = links
+        links: set[Link] = _deserialize_links(metadata.get(METADATA_LINKS_KEY))
+        metadata[METADATA_LINKS_KEY] = links
     else:
         metadata = {}
         links = set()
     return Node(
         id=getattr(row, ROW_ID, ""),
-        # TODO: figure out how to pass this when needed
-        # embedding=getattr(row, "text_embedding", []),
+        # TODO: figure out how to pass this through.
+        # embedding=getattr(row, VECTOR, []),
         text=getattr(row, BODY_BLOB, ""),
         metadata=metadata,
         links=links,
@@ -235,6 +135,17 @@ def _incoming_links(node:Node) -> set[Link]:
 
 def _outgoing_links(node:Node) -> set[Link]:
     return set([l for l in node.links if l.direction in ["out", "bidir"]])
+
+class AdjacentNode:
+    id: str
+    links: list[Link]
+    embedding: list[float]
+
+    def __init__(self, node: Node, embedding: List[float]) -> None:
+        self.id = node.id
+        self.links = node.links
+        self.embedding = embedding
+
 
 @beta()
 class CassandraGraphVectorStore(GraphVectorStore):
@@ -308,7 +219,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
         self._prepared_query_cache: dict[str, PreparedStatement] = {}
 
         deny_list = list(metadata_deny_list)
-        deny_list.append(LINKS_METADATA_KEY)
+        deny_list.append(METADATA_LINKS_KEY)
 
         self.store = CassandraVectorStore(
             embedding=embedding,
@@ -329,14 +240,6 @@ class CassandraGraphVectorStore(GraphVectorStore):
             """  # noqa: S608
         )
 
-        self._query_by_id = session.prepare(
-            f"""
-            SELECT {ROW_ID}, {BODY_BLOB}, {METADATA_BLOB}
-            FROM {keyspace}.{table_name}
-            WHERE content_id = ?
-            """  # noqa: S608
-        )
-
         self._query_id_and_metadata_by_id = session.prepare(
             f"""
             SELECT {ROW_ID}, {METADATA_BLOB}
@@ -348,9 +251,6 @@ class CassandraGraphVectorStore(GraphVectorStore):
     @property
     def embeddings(self) -> Optional[Embeddings]:
         return self._embedding
-
-    def _concurrent_queries(self) -> ConcurrentQueries:
-        return ConcurrentQueries(self._session)
 
     # TODO: Async (aadd_nodes)
     def add_nodes(
@@ -369,28 +269,28 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 node_ids.append(node.id)
             texts.append(node.text)
             combined_metadata = node.metadata.copy()
-            combined_metadata[LINKS_METADATA_KEY] = _serialize_links(node.links)
+            combined_metadata[METADATA_LINKS_KEY] = _serialize_links(node.links)
             metadata_list.append(combined_metadata)
             incoming_links_list.append(_incoming_links(node=node))
 
         text_embeddings = self._embedding.embed_documents(texts)
 
-        with self._concurrent_queries() as cq:
-            tuples = zip(node_ids, texts, text_embeddings, metadata_list, incoming_links_list)
-            for node_id, text, text_embedding, metadata, incoming_links in tuples:
+        futures = []
+        tuples = zip(node_ids, texts, text_embeddings, metadata_list, incoming_links_list)
+        for node_id, text, text_embedding, metadata, incoming_links in tuples:
+            metadata_s = {
+                k: MetadataMixin._coerce_string(v)
+                for k, v in metadata.items()
+                if k not in self._metadata_deny_list
+            }
 
-                metadata_s = {
-                    k: MetadataMixin._coerce_string(v)
-                    for k, v in metadata.items()
-                    if k not in self._metadata_deny_list
-                }
+            for incoming_link in incoming_links:
+                metadata_s[_metadata_s_link_key(link=incoming_link)] =_metadata_s_link_value()
 
-                for incoming_link in incoming_links:
-                    metadata_s[_metadata_s_link_key(link=incoming_link)] =_metadata_s_link_value()
+            metadata_blob = _serialize_metadata(metadata)
 
-                metadata_blob = _serialize_metadata(metadata)
-
-                cq.execute(
+            futures.append(
+                self._session.execute_async(
                     self._insert_node,
                     parameters=(
                         node_id,
@@ -401,6 +301,10 @@ class CassandraGraphVectorStore(GraphVectorStore):
                     ),
                     timeout=30.0,
                 )
+            )
+
+        for future in futures:
+            future.result()
 
         return node_ids
 
@@ -440,13 +344,27 @@ class CassandraGraphVectorStore(GraphVectorStore):
         **kwargs: Any,
     ) -> List[Document]:
         # TODO: Deserialize Links
-        return self.similarity_search(
+        return self.store.similarity_search(
             query=query,
             k=k,
-            metadata_filter=metadata_filter,
+           filter=metadata_filter,
         )
 
-    def similarity_search_by_vector(
+    async def asimilarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        metadata_filter: dict[str, Any] = {},
+        **kwargs: Any,
+    ) -> List[Document]:
+        # TODO: Deserialize Links
+        return await self.store.asimilarity_search(
+            query=query,
+            k=k,
+           filter=metadata_filter,
+        )
+
+    async def asimilarity_search_by_vector(
         self,
         embedding: List[float],
         k: int = 4,
@@ -454,60 +372,45 @@ class CassandraGraphVectorStore(GraphVectorStore):
         **kwargs: Any,
     ) -> List[Document]:
         # TODO: Deserialize Links
-        return self.store.similarity_search_by_vector(
+        return await self.store.asimilarity_search_by_vector(
             embedding,
             k=k,
-            metadata_filter=metadata_filter,
+            filter=metadata_filter,
         )
 
     def metadata_search(
         self,
         metadata: dict[str, Any] = {},  # noqa: B006
         n: int = 5,
-    ) -> Iterable[Node]:
+    ) -> Iterable[Document]:
         """Retrieve nodes based on their metadata."""
-        query, params = self._get_search_cql_and_params(
-            columns=f"{ROW_ID}, {BODY_BLOB}, {METADATA_BLOB}",
+        return self.store.metadata_search(
             metadata=metadata,
-            limit=n,
+            n=n,
         )
 
-        for row in self._session.execute(query, params):
-            yield _row_to_node(row)
+    async def ametadata_search(
+        self,
+        metadata: dict[str, Any] = {},  # noqa: B006
+        n: int = 5,
+    ) -> Iterable[Document]:
+        """Retrieve nodes based on their metadata."""
+        return await self.store.ametadata_search(
+            metadata=metadata,
+            n=n,
+        )
 
-    def _nodes_with_ids(
+    async def _documents_with_ids(
         self,
         ids: Iterable[str],
-    ) -> list[Node]:
-        results: dict[str, Node | None] = {}
-        with self._concurrent_queries() as cq:
+    ) -> list[Document|None]:
+        tasks = [
+            self.store.aget_by_document_id(document_id=id)
+            for id in ids
+        ]
+        return await asyncio.gather(*tasks)
 
-            def node_callback(rows: Iterable[Any]) -> None:
-                # Should always be exactly one row here. We don't need to check
-                #   1. The query is for a `ID == ?` query on the primary key.
-                #   2. If it doesn't exist, the `get_result` method below will
-                #      raise an exception indicating the ID doesn't exist.
-                for row in rows:
-                    row_id = getattr(row, ROW_ID)
-                    results[row_id] = _row_to_node(row)
-
-            for node_id in ids:
-                if node_id not in results:
-                    # Mark this node ID as being fetched.
-                    results[node_id] = None
-                    cq.execute(
-                        self._query_by_id, parameters=(node_id,), callback=node_callback
-                    )
-
-        def get_result(node_id: str) -> Node:
-            if (result := results[node_id]) is None:
-                msg = f"No node with ID '{node_id}'"
-                raise ValueError(msg)
-            return result
-
-        return [get_result(node_id) for node_id in ids]
-
-    def mmr_traversal_search(
+    async def ammr_traversal_search(
         self,
         query: str,
         *,
@@ -564,7 +467,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
         visited_links: set[Link] = set()
 
 
-        def fetch_neighborhood(neighborhood: Sequence[str]) -> None:
+        async def fetch_neighborhood(neighborhood: Sequence[str]) -> None:
             nonlocal outgoing_links_map
             nonlocal visited_links
 
@@ -577,7 +480,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
             visited_links = self._get_outgoing_links(neighborhood)
 
             # Call `self._get_adjacent` to fetch the candidates.
-            adjacent_items = self._get_adjacent(
+            adjacent_nodes = await self._get_adjacent(
                 links=visited_links,
                 query_embedding=query_embedding,
                 k_per_link=adjacent_k,
@@ -585,38 +488,34 @@ class CassandraGraphVectorStore(GraphVectorStore):
             )
 
             new_candidates: dict[str, list[float]] = {}
-            for adjacent_node, embedding in adjacent_items:
+            for adjacent_node in adjacent_nodes:
                 if adjacent_node.id not in outgoing_links_map:
                     outgoing_links_map[adjacent_node.id] = _outgoing_links(node=adjacent_node)
-                    new_candidates[adjacent_node.id] = embedding
+                    new_candidates[adjacent_node.id] = adjacent_node.embedding
             helper.add_candidates(new_candidates)
 
-        def fetch_initial_candidates() -> None:
+        async def fetch_initial_candidates() -> None:
             nonlocal outgoing_links_map
             nonlocal visited_links
 
-            initial_candidates_query, params = self._get_search_cql_and_params(
-                columns = "content_id, text_embedding, metadata_blob",
-                limit=fetch_k,
-                metadata=metadata_filter,
+            results = await self.store.asimilarity_search_with_embedding_id_by_vector(
                 embedding=query_embedding,
+                k=fetch_k,
+                filter=metadata_filter,
             )
 
-            rows = self._session.execute(
-                query=initial_candidates_query, parameters=params
-            )
             candidates: dict[str, list[float]] = {}
-            for row in rows:
-                if row.content_id not in outgoing_links_map:
-                    node = _row_to_node(row=row)
-                    outgoing_links_map[node.id] = node.outgoing_links()
-                    candidates[node.id] = node.embedding
+            for (doc, embedding, id) in results:
+                if id not in outgoing_links_map:
+                    node = _doc_to_node(doc)
+                    outgoing_links_map[id] = _outgoing_links(node=node)
+                    candidates[id] = embedding
             helper.add_candidates(candidates)
 
         if initial_roots:
-            fetch_neighborhood(initial_roots)
+            await fetch_neighborhood(initial_roots)
         if fetch_k > 0:
-            fetch_initial_candidates()
+            await fetch_initial_candidates()
 
         # Tracks the depth of each candidate.
         depths = {candidate_id: 0 for candidate_id in helper.candidate_ids()}
@@ -632,10 +531,6 @@ class CassandraGraphVectorStore(GraphVectorStore):
             if next_depth < depth:
                 # If the next nodes would not exceed the depth limit, find the
                 # adjacent nodes.
-                #
-                # TODO: For a big performance win, we should track which links we've
-                # already incorporated. We don't need to issue adjacent queries for
-                # those.
 
                 # Find the links linked to from the selected ID.
                 selected_outgoing_links = outgoing_links_map.pop(selected_id)
@@ -644,7 +539,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 selected_outgoing_links.difference_update(visited_links)
 
                 # Find the nodes with incoming links from those links.
-                adjacent_nodes = self._get_adjacent(
+                adjacent_nodes = await self._get_adjacent(
                     links=selected_outgoing_links,
                     query_embedding=query_embedding,
                     k_per_link=adjacent_k,
@@ -657,7 +552,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 new_candidates = {}
                 for adjacent_node in adjacent_nodes:
                     if adjacent_node.id not in outgoing_links_map:
-                        outgoing_links_map[adjacent_node.id] = adjacent_node.outgoing_links()
+                        outgoing_links_map[adjacent_node.id] = _outgoing_links(node=adjacent_node)
                         new_candidates[adjacent_node.id] = adjacent_node.embedding
                         if next_depth < depths.get(adjacent_node.id, depth + 1):
                             # If this is a new shortest depth, or there was no
@@ -673,15 +568,15 @@ class CassandraGraphVectorStore(GraphVectorStore):
                             depths[adjacent_node.id] = next_depth
                 helper.add_candidates(new_candidates)
 
-        return self._nodes_with_ids(helper.selected_ids)
+        return self._documents_with_ids(helper.selected_ids)
 
-    def traversal_search(
+    async def atraversal_search(
         self,
         query: str,
         *,
         k: int = 4,
         depth: int = 1,
-        metadata_filter: dict[str, Any] = {},  # noqa: B006
+        metadata_filter: dict[str, Any] = {},
     ) -> Iterable[Node]:
         """Retrieve documents from this knowledge store.
 
@@ -710,133 +605,176 @@ class CassandraGraphVectorStore(GraphVectorStore):
         #
         # ...
 
+        # Map from visited ID to depth
+        visited_ids: Dict[str, int] = {}
 
+        # Map from visited link to depth
+        visited_links: Dict[Link, int] = {}
 
+        # Map from id to Document
+        retrieved_docs: Dict[str, Document] = {}
 
-        with self._concurrent_queries() as cq:
-            # Map from visited ID to depth
-            visited_ids: dict[str, int] = {}
+        async def visit_nodes(d: int, docs: Iterable[Document]) -> None:
+            """Recursively visit nodes and their outgoing links."""
+            nonlocal visited_ids, visited_links, retrieved_docs
 
-            # Map from visited link to depth. Allows skipping queries
-            # for links that we've already traversed.
-            visited_links: dict[Link, int] = {}
+            # Iterate over nodes, tracking the *new* outgoing links for this
+            # depth. These are links that are either new, or newly discovered at a
+            # lower depth.
+            outgoing_links: Set[Link] = set()
+            for doc in docs:
+                if doc.id not in retrieved_docs:
+                    retrieved_docs[doc.id] = doc
 
-            def visit_nodes(d: int, rows: Sequence[Any]) -> None:
-                nonlocal visited_ids
-                nonlocal visited_links
+                # If this node is at a closer depth, update visited_ids
+                if d <= visited_ids.get(doc.id, depth):
+                    visited_ids[doc.id] = d
 
-                # Visit nodes at the given depth.
+                    # If we can continue traversing from this node,
+                    if d < depth:
+                        node = _doc_to_node(doc=doc)
+                        # Record any new (or newly discovered at a lower depth)
+                        # links to the set to traverse.
+                        for link in _outgoing_links(node=node):
+                            if d <= visited_links.get(link, depth):
+                                # Record that we'll query this link at the
+                                # given depth, so we don't fetch it again
+                                # (unless we find it an earlier depth)
+                                visited_links[link] = d
+                                outgoing_links.add(link)
 
-                # Iterate over nodes, tracking the *new* outgoing links for this
-                # depth. These are links that are either new, or newly discovered at a
-                # lower depth.
-                outgoing_links: Set[Link] = set()
-                for row in rows:
-                    content_id = row.content_id
+            if outgoing_links:
+                tasks = []
+                for outgoing_link in outgoing_links:
+                    metadata = self._get_metadata_filter(
+                        metadata=metadata_filter,
+                        outgoing_link=outgoing_link,
+                    )
+                    task = asyncio.create_task(
+                        self.store.ametadata_search(metadata=metadata, n=None)
+                    )
+                    tasks.append(task)
+                results = await asyncio.gather(*tasks)
 
-                    # Add visited ID. If it is closer it is a new node at this depth:
-                    if d <= visited_ids.get(content_id, depth):
-                        visited_ids[content_id] = d
+                # Visit targets concurrently
+                tasks = [visit_targets(d=d + 1, docs=docs) for docs in results]
+                await asyncio.gather(*tasks)
 
-                        # If we can continue traversing from this node,
-                        if d < depth:
-                            node = _row_to_node(row=row)
-                            # Record any new (or newly discovered at a lower depth)
-                            # links to the set to traverse.
-                            for link in node.outgoing_links():
-                                if d <= visited_links.get(link, depth):
-                                    # Record that we'll query this link at the
-                                    # given depth, so we don't fetch it again
-                                    # (unless we find it an earlier depth)
-                                    visited_links[link] = d
-                                    outgoing_links.add(link)
+        async def visit_targets(d: int, docs: Iterable[Document]) -> None:
+            """Visit target nodes retrieved from outgoing links."""
+            nonlocal visited_ids, retrieved_docs
 
-                if outgoing_links:
-                    # If there are new links to visit at the next depth, query for the
-                    # node IDs.
-                    for outgoing_link in outgoing_links:
-                        visit_nodes_query, params = self._get_search_cql_and_params(
-                            columns="content_id AS target_content_id",
-                            metadata=metadata_filter,
-                            outgoing_link=outgoing_link,
+            new_ids_at_next_depth = set()
+            for doc in docs:
+                if doc.id not in retrieved_docs:
+                    retrieved_docs[doc.id] = doc
+
+                if d <= visited_ids.get(doc.id, depth):
+                    new_ids_at_next_depth.add(doc.id)
+
+            if new_ids_at_next_depth:
+                fetch_tasks = []
+                visit_node_tasks = []
+                for id in new_ids_at_next_depth:
+                    if id in retrieved_docs:
+                        visit_node_tasks.append(visit_nodes(d=d, docs=[retrieved_docs[id]]))
+                    else:
+                        fetch_task = asyncio.create_task(
+                            self.store.aget_by_document_id(document_id=id)
                         )
-                        cq.execute(
-                            query=visit_nodes_query,
-                            parameters=params,
-                            callback=lambda rows, d=d: visit_targets(d, rows),
-                        )
+                        fetch_tasks.append(fetch_task)
 
-            def visit_targets(d: int, rows: Sequence[Any]) -> None:
-                nonlocal visited_ids
+                results = await asyncio.gather(*fetch_tasks)
+                for result in results:
+                    visit_node_tasks.append(visit_nodes(d=d, docs=[result]))
 
-                new_node_ids_at_next_depth = set()
-                for row in rows:
-                    content_id = row.target_content_id
-                    if d < visited_ids.get(content_id, depth):
-                        new_node_ids_at_next_depth.add(content_id)
+                await asyncio.gather(*visit_node_tasks)
 
-                if new_node_ids_at_next_depth:
-                    for node_id in new_node_ids_at_next_depth:
-                        cq.execute(
-                            self._query_id_and_metadata_by_id,
-                            parameters=(node_id,),
-                            callback=lambda rows, d=d: visit_nodes(d + 1, rows),
-                        )
+        # Start the traversal
+        initial_embedding = self._embedding.embed_query(query)
+        initial_docs = await self.store.asimilarity_search_by_vector(
+            embedding=initial_embedding,
+            k=k,
+            filter=metadata_filter,
+        )
+        await visit_nodes(d=0, docs=initial_docs)
 
-            initial_query, params = self._get_search_cql_and_params(
-                columns="content_id, metadata_blob",
-                limit=k,
-                metadata=metadata_filter,
-                embedding=self._embedding.embed_query(query),
-            )
+        return [retrieved_docs[id] for id in visited_ids.keys()]
 
-            cq.execute(
-                initial_query,
-                parameters=params,
-                callback=lambda initial_rows: visit_nodes(0, initial_rows),
-            )
+    def traversal_search(
+        self,
+        query: str,
+        *,
+        k: int = 4,
+        depth: int = 1,
+        metadata_filter: dict[str, Any] = {},  # noqa: B006
+    ) -> Iterable[Node]:
+        """Retrieve documents from this knowledge store.
 
-        return self._nodes_with_ids(visited_ids.keys())
+        First, `k` nodes are retrieved using a vector search for the `query` string.
+        Then, additional nodes are discovered up to the given `depth` from those
+        starting nodes.
 
+        Args:
+            query: The query string.
+            k: The number of Documents to return from the initial vector search.
+                Defaults to 4.
+            depth: The maximum depth of edges to traverse. Defaults to 1.
+            metadata_filter: Optional metadata to filter the results.
+
+        Returns:
+            Collection of retrieved documents.
+        """
+        return asyncio.run(self.atraversal_search(
+            query=query,
+            k=k,
+            depth=depth,
+            metadata_filter=metadata_filter,
+        ))
 
 
     def get_node(self, content_id: str) -> Node:
         """Get a node by its id."""
-        return self._nodes_with_ids(ids=[content_id])[0]
+        return self._documents_with_ids(ids=[content_id])[0]
 
-    def _get_outgoing_links(
-        self,
-        source_ids: Iterable[str],
-    ) -> set[Link]:
-        """Return the set of outgoing links for the given source ID(s).
+    async def _get_outgoing_links(self, source_ids: Iterable[str]) -> Set[Link]:
+        """Return the set of outgoing links for the given source IDs asynchronously.
 
         Args:
             source_ids: The IDs of the source nodes to retrieve outgoing links for.
+
+        Returns:
+            A set of `Link` objects representing the outgoing links from the source nodes.
         """
         links = set()
 
-        def add_sources(rows: Iterable[Any]) -> None:
-            for row in rows:
-                node = _row_to_node(row=row)
-                links.update(node.outgoing_links())
+        # Create coroutine objects without scheduling them yet
+        coroutines = [
+            self.store.aget_by_document_id(document_id=source_id)
+            for source_id in source_ids
+        ]
 
-        with self._concurrent_queries() as cq:
-            for source_id in source_ids:
-                cq.execute(
-                    self._query_id_and_metadata_by_id,
-                    (source_id,),
-                    callback=add_sources,
-                )
+        # Schedule and await all coroutines
+        docs = await asyncio.gather(*coroutines)
+
+        for doc in docs:
+            if doc is not None:
+                node = _doc_to_node(doc=doc)
+                links.update(_outgoing_links(node=node))
+            else:
+                # Handle the case where the document is not found
+                pass
 
         return links
 
-    def _get_adjacent(
+
+    async def _get_adjacent(
         self,
         links: set[Link],
         query_embedding: list[float],
         k_per_link: int | None = None,
         metadata_filter: dict[str, Any] | None = None,
-    ) -> Iterable[Tuple[Node, list[float]]]:
+    ) -> Iterable[AdjacentNode]:
         """Return the target nodes with incoming links from any of the given links.
 
         Args:
@@ -848,170 +786,44 @@ class CassandraGraphVectorStore(GraphVectorStore):
         Returns:
             List of adjacent edges.
         """
-        targets: dict[str, Tuple[Node, list[float]]] = {}
+        targets: dict[str, AdjacentNode] = {}
 
-        def add_targets(rows: Iterable[Any]) -> None:
-            nonlocal targets
+        tasks = []
+        for link in links:
+            filter = self._get_metadata_filter(
+                metadata=metadata_filter,
+                outgoing_link=link,
+            )
 
-            # TODO: Figure out how to use the "kind" on the edge.
-            # This is tricky, since we currently issue one query for anything
-            # adjacent via any kind, and we don't have enough information to
-            # determine which kind(s) a given target was reached from.
-            for row in rows:
-                row_id = getattr(row, ROW_ID)
-                if row_id not in targets:
-                    embedding = getattr(row, VECTOR)
-                    targets[row_id] = (_row_to_node(row=row), embedding)
-
-        with self._concurrent_queries() as cq:
-            for link in links:
-                adjacent_query, params = self._get_search_cql_and_params(
-                    columns = "content_id, text_embedding, metadata_blob",
-                    limit=k_per_link or 10,
-                    metadata=metadata_filter,
+            tasks.append(
+                self.store.asimilarity_search_with_embedding_id_by_vector(
                     embedding=query_embedding,
-                    outgoing_link=link,
+                    k=k_per_link or 10,
+                    filter=filter
                 )
+            )
 
-                cq.execute(
-                    query=adjacent_query,
-                    parameters=params,
-                    callback=add_targets,
-                )
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            for (doc, embedding, id) in result:
+                if id not in targets:
+                    node = _doc_to_node(doc=doc)
+                    targets[id] = AdjacentNode(node=node, embedding=embedding)
 
         # TODO: Consider a combined limit based on the similarity and/or
         # predicated MMR score?
         return targets.values()
 
-    @staticmethod
-    def _normalize_metadata_indexing_policy(
-        metadata_indexing: tuple[str, Iterable[str]] | str,
-    ) -> MetadataIndexingPolicy:
-        mode: MetadataIndexingMode
-        fields: set[str]
-        # metadata indexing policy normalization:
-        if isinstance(metadata_indexing, str):
-            if metadata_indexing.lower() == "all":
-                mode, fields = (MetadataIndexingMode.DEFAULT_TO_SEARCHABLE, set())
-            elif metadata_indexing.lower() == "none":
-                mode, fields = (MetadataIndexingMode.DEFAULT_TO_UNSEARCHABLE, set())
-            else:
-                msg = f"Unsupported metadata_indexing value '{metadata_indexing}'"
-                raise ValueError(msg)
-        else:
-            # it's a 2-tuple (mode, fields) still to normalize
-            _mode, _field_spec = metadata_indexing
-            fields = {_field_spec} if isinstance(_field_spec, str) else set(_field_spec)
-            if _mode.lower() in {
-                "default_to_unsearchable",
-                "allowlist",
-                "allow",
-                "allow_list",
-            }:
-                mode = MetadataIndexingMode.DEFAULT_TO_UNSEARCHABLE
-            elif _mode.lower() in {
-                "default_to_searchable",
-                "denylist",
-                "deny",
-                "deny_list",
-            }:
-                mode = MetadataIndexingMode.DEFAULT_TO_SEARCHABLE
-            else:
-                msg = f"Unsupported metadata indexing mode specification '{_mode}'"
-                raise ValueError(msg)
-        return mode, fields
 
-    @staticmethod
-    def _coerce_string(value: Any) -> str:
-        if isinstance(value, str):
-            return value
-        if isinstance(value, bool):
-            # bool MUST come before int in this chain of ifs!
-            return json.dumps(value)
-        if isinstance(value, int):
-            # we don't want to store '1' and '1.0' differently
-            # for the sake of metadata-filtered retrieval:
-            return json.dumps(float(value))
-        if isinstance(value, float) or value is None:
-            return json.dumps(value)
-        # when all else fails ...
-        return str(value)
 
-    def _extract_where_clause_cql(
-        self,
-        metadata_keys: Sequence[str] = (),
-    ) -> str:
-        wc_blocks: list[str] = []
-
-        for key in sorted(metadata_keys):
-            if _is_metadata_field_indexed(key, self._metadata_indexing_policy):
-                wc_blocks.append(f"metadata_s['{key}'] = %s")
-            else:
-                msg = "Non-indexed metadata fields cannot be used in queries."
-                raise ValueError(msg)
-
-        if len(wc_blocks) == 0:
-            return ""
-
-        return " WHERE " + " AND ".join(wc_blocks)
-
-    def _extract_where_clause_params(
-        self,
-        metadata: dict[str, Any],
-    ) -> list[Any]:
-        params: list[Any] = []
-
-        for key, value in sorted(metadata.items()):
-            if _is_metadata_field_indexed(key, self._metadata_indexing_policy):
-                params.append(self._coerce_string(value=value))
-            else:
-                msg = "Non-indexed metadata fields cannot be used in queries."
-                raise ValueError(msg)
-
-        return params
-
-    def _get_search_cql_and_params(
-        self,
-        columns: str,
-        limit: int | None = None,
+    def _get_metadata_filter(
         metadata: dict[str, Any] | None = None,
-        embedding: list[float] | None = None,
         outgoing_link: Link | None = None,
-    ) -> tuple[PreparedStatement|SimpleStatement, tuple[Any, ...]]:
-        if outgoing_link is not None:
-            if metadata is None:
-                metadata = {}
-            else:
-                # don't add link search to original metadata dict
-                metadata = metadata.copy()
-                metadata[_metadata_s_link_key(link=outgoing_link)] = _metadata_s_link_value()
+    ) -> dict[str, Any]:
+        if outgoing_link is None:
+            return metadata
 
-        metadata_keys = list(metadata.keys()) if metadata else []
-
-        where_clause = self._extract_where_clause_cql(metadata_keys=metadata_keys)
-        limit_clause = " LIMIT ?" if limit is not None else ""
-        order_clause = " ORDER BY text_embedding ANN OF ?" if embedding is not None else ""
-
-        select_cql = SELECT_CQL_TEMPLATE.format(
-            columns=columns,
-            table_name=self.table_name(),
-            where_clause=where_clause,
-            order_clause=order_clause,
-            limit_clause=limit_clause,
-        )
-
-        where_params = self._extract_where_clause_params(metadata=metadata or {})
-        limit_params = [limit] if limit is not None else []
-        order_params = [embedding] if embedding is not None else []
-
-        params = tuple(list(where_params) + order_params + limit_params)
-
-        if len(metadata_keys) > 0:
-            return SimpleStatement(query_string=select_cql, fetch_size=100), params
-        elif select_cql in self._prepared_query_cache:
-            return self._prepared_query_cache[select_cql], params
-        else:
-            prepared_query = self._session.prepare(select_cql)
-            prepared_query.consistency_level = ConsistencyLevel.ONE
-            self._prepared_query_cache[select_cql] = prepared_query
-            return prepared_query, params
+        metadata_filter = {} if metadata is None else metadata.copy()
+        metadata_filter[_metadata_s_link_key(link=outgoing_link)] = _metadata_s_link_value()
+        return metadata_filter
