@@ -6,6 +6,7 @@ from typing import (
     Any,
     ClassVar,
     Optional,
+    Sequence,
 )
 
 from langchain_core._api import beta
@@ -383,6 +384,7 @@ class GraphVectorStore(VectorStore):
         *,
         k: int = 4,
         depth: int = 1,
+        metadata_filter: dict[str, Any] = {},  # noqa: B006
         **kwargs: Any,
     ) -> Iterable[Document]:
         """Retrieve documents from traversing this graph store.
@@ -396,6 +398,7 @@ class GraphVectorStore(VectorStore):
             k: The number of Documents to return from the initial search.
                 Defaults to 4. Applies to each of the query strings.
             depth: The maximum depth of edges to traverse. Defaults to 1.
+            metadata_filter: Optional metadata to filter the results.
         Returns:
             Retrieved documents.
         """
@@ -406,6 +409,7 @@ class GraphVectorStore(VectorStore):
         *,
         k: int = 4,
         depth: int = 1,
+        metadata_filter: dict[str, Any] = {},  # noqa: B006
         **kwargs: Any,
     ) -> AsyncIterable[Document]:
         """Retrieve documents from traversing this graph store.
@@ -419,6 +423,7 @@ class GraphVectorStore(VectorStore):
             k: The number of Documents to return from the initial search.
                 Defaults to 4. Applies to each of the query strings.
             depth: The maximum depth of edges to traverse. Defaults to 1.
+            metadata_filter: Optional metadata to filter the results.
         Returns:
             Retrieved documents.
         """
@@ -439,12 +444,14 @@ class GraphVectorStore(VectorStore):
         self,
         query: str,
         *,
+        initial_roots: Sequence[str] = (),
         k: int = 4,
         depth: int = 2,
         fetch_k: int = 100,
         adjacent_k: int = 10,
         lambda_mult: float = 0.5,
         score_threshold: float = float("-inf"),
+        metadata_filter: dict[str, Any] = {},  # noqa: B006
         **kwargs: Any,
     ) -> Iterable[Document]:
         """Retrieve documents from this graph store using MMR-traversal.
@@ -459,6 +466,10 @@ class GraphVectorStore(VectorStore):
 
         Args:
             query: The query string to search for.
+            initial_roots: Optional list of document IDs to use for initializing search.
+                The top `adjacent_k` nodes adjacent to each initial root will be
+                included in the set of initial candidates. To fetch only in the
+                neighborhood of these nodes, set `fetch_k = 0`.
             k: Number of Documents to return. Defaults to 4.
             fetch_k: Number of Documents to fetch via similarity.
                 Defaults to 100.
@@ -471,18 +482,21 @@ class GraphVectorStore(VectorStore):
                 diversity and 1 to minimum diversity. Defaults to 0.5.
             score_threshold: Only documents with a score greater than or equal
                 this threshold will be chosen. Defaults to negative infinity.
+            metadata_filter: Optional metadata to filter the results.
         """
 
     async def ammr_traversal_search(
         self,
         query: str,
         *,
+        initial_roots: Sequence[str] = (),
         k: int = 4,
         depth: int = 2,
         fetch_k: int = 100,
         adjacent_k: int = 10,
         lambda_mult: float = 0.5,
         score_threshold: float = float("-inf"),
+        metadata_filter: dict[str, Any] = {},  # noqa: B006
         **kwargs: Any,
     ) -> AsyncIterable[Document]:
         """Retrieve documents from this graph store using MMR-traversal.
@@ -497,6 +511,10 @@ class GraphVectorStore(VectorStore):
 
         Args:
             query: The query string to search for.
+            initial_roots: Optional list of document IDs to use for initializing search.
+                The top `adjacent_k` nodes adjacent to each initial root will be
+                included in the set of initial candidates. To fetch only in the
+                neighborhood of these nodes, set `fetch_k = 0`.
             k: Number of Documents to return. Defaults to 4.
             fetch_k: Number of Documents to fetch via similarity.
                 Defaults to 100.
@@ -509,12 +527,14 @@ class GraphVectorStore(VectorStore):
                 diversity and 1 to minimum diversity. Defaults to 0.5.
             score_threshold: Only documents with a score greater than or equal
                 this threshold will be chosen. Defaults to negative infinity.
+            metadata_filter: Optional metadata to filter the results.
         """
         iterator = iter(
             await run_in_executor(
                 None,
                 self.mmr_traversal_search,
                 query,
+                initial_roots=initial_roots,
                 k=k,
                 fetch_k=fetch_k,
                 adjacent_k=adjacent_k,
