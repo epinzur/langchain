@@ -4,7 +4,6 @@ import dataclasses
 from typing import TYPE_CHECKING, Iterable
 
 import numpy as np
-
 from ragstack_knowledge_store.math import cosine_similarity
 
 if TYPE_CHECKING:
@@ -108,7 +107,7 @@ class MmrHelper:
 
         # List of the candidates.
         self.candidates = []
-        # ND array of the candidate embeddings.
+        # N-Dimensional array of the candidate embeddings.
         self.candidate_embeddings = np.ndarray((0, self.dimensions), dtype=np.float32)
 
         self.best_score = NEG_INF

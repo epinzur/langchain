@@ -334,11 +334,9 @@ class Cassandra(VectorStore):
         return ids
 
     @staticmethod
-    def _row_to_document(row: Dict[str, Any] | None) -> Document | None:
-        if row is None:
-            return None
+    def _row_to_document(row: Dict[str, Any]) -> Document:
         return Document(
-            id = row["row_id"],
+            id=row["row_id"],
             page_content=row["body_blob"],
             metadata=row["metadata"],
         )
@@ -350,6 +348,8 @@ class Cassandra(VectorStore):
             document_id: the document ID to get.
         """
         row = self.table.get(row_id=document_id)
+        if row is None:
+            return None
         return self._row_to_document(row=row)
 
     async def aget_by_document_id(self, document_id: str) -> Document | None:
@@ -359,6 +359,8 @@ class Cassandra(VectorStore):
             document_id: the document ID to get.
         """
         row = await self.table.aget(row_id=document_id)
+        if row is None:
+            return None
         return self._row_to_document(row=row)
 
     def metadata_search(
@@ -371,8 +373,8 @@ class Cassandra(VectorStore):
         Args:
             metadata: the metadata to query for.
         """
-        rows = self.table.find_entries(metadata = metadata, n=n)
-        return [self._row_to_document(row=row) for row in rows]
+        rows = self.table.find_entries(metadata=metadata, n=n)
+        return [self._row_to_document(row=row) for row in rows if row]
 
     async def ametadata_search(
         self,
@@ -384,7 +386,7 @@ class Cassandra(VectorStore):
         Args:
             metadata: the metadata to query for.
         """
-        rows = await self.table.afind_entries(metadata = metadata, n=n)
+        rows = await self.table.afind_entries(metadata=metadata, n=n)
         return [self._row_to_document(row=row) for row in rows]
 
     async def asimilarity_search_with_embedding_id_by_vector(
@@ -428,7 +430,6 @@ class Cassandra(VectorStore):
             )
             for hit in hits
         ]
-
 
     @staticmethod
     def _search_to_documents(
