@@ -423,11 +423,7 @@ class Cassandra(VectorStore):
         )
         return [
             (
-                Document(
-                    page_content=hit["body_blob"],
-                    metadata=hit["metadata"],
-                    id=hit["row_id"],
-                ),
+                self._row_to_document(row=hit),
                 hit["vector"],
                 hit["row_id"],
             )
@@ -442,10 +438,7 @@ class Cassandra(VectorStore):
         # (1=most relevant), as required by this class' contract.
         return [
             (
-                Document(
-                    page_content=hit["body_blob"],
-                    metadata=hit["metadata"],
-                ),
+                Cassandra._row_to_document(row=hit),
                 0.5 + 0.5 * hit["distance"],
                 hit["row_id"],
             )
@@ -812,13 +805,7 @@ class Cassandra(VectorStore):
             for pf_index, pf_hit in enumerate(prefetch_hits)
             if pf_index in mmr_chosen_indices
         ]
-        return [
-            Document(
-                page_content=hit["body_blob"],
-                metadata=hit["metadata"],
-            )
-            for hit in mmr_hits
-        ]
+        return [Cassandra._row_to_document(row=hit) for hit in mmr_hits]
 
     def max_marginal_relevance_search_by_vector(
         self,

@@ -769,7 +769,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 await asyncio.gather(*visit_node_tasks)
 
         # Start the traversal
-        initial_docs = await self.store.asimilarity_search(
+        initial_docs = self.store.similarity_search(
             query=query,
             k=k,
             filter=metadata_filter,
