@@ -194,13 +194,12 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 Note: the `metadata_indexing` parameter from
                 langchain_community.utilities.cassandra.Cassandra is not
                 exposed since CassandraGraphVectorStore only supports the
-                deny-list option.
+                deny_list option.
         """
-
-        self._metadata_deny_list = metadata_deny_list
 
         deny_list = list(metadata_deny_list)
         deny_list.append(METADATA_LINKS_KEY)
+        self._metadata_deny_list = deny_list
 
         self.store = CassandraVectorStore(
             embedding=embedding,
@@ -210,7 +209,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
             ttl_seconds=ttl_seconds,
             body_index_options=body_index_options,
             setup_mode=setup_mode,
-            metadata_indexing=("deny-list", deny_list),
+            metadata_indexing=("deny_list", deny_list),
         )
 
         store_session: Session = self.store.session
@@ -218,7 +217,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
         self._insert_node = store_session.prepare(
             f"""
             INSERT INTO {keyspace}.{table_name} (
-                row_id, body_blob, vector, metadata_blob, metadata_s
+                row_id, body_blob, vector, attributes_blob, metadata_s
             ) VALUES (?, ?, ?, ?, ?)
             """  # noqa: S608
         )
@@ -268,7 +267,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                     _metadata_s_link_value()
                 )
 
-            metadata_blob = _serialize_metadata(metadata)
+            attributes_blob = _serialize_metadata(metadata)
 
             futures.append(
                 store_session.execute_async(
@@ -277,7 +276,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                         node_id,
                         text,
                         text_embedding,
-                        metadata_blob,
+                        attributes_blob,
                         metadata_s,
                     ),
                     timeout=30.0,

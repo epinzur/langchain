@@ -143,6 +143,9 @@ class Cassandra(VectorStore):
             **kwargs,
         )
 
+        if self.session is None:
+            self.session = self.table.session
+
     @property
     def embeddings(self) -> Embeddings:
         return self.embedding
