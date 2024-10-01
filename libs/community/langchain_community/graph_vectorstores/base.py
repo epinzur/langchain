@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from abc import abstractmethod
 from collections.abc import AsyncIterable, Collection, Iterable, Iterator
 from typing import (
@@ -22,6 +24,7 @@ from pydantic import Field
 
 from langchain_community.graph_vectorstores.links import METADATA_LINKS_KEY, Link
 
+logger = logging.getLogger(__name__)
 
 def _has_next(iterator: Iterator) -> bool:
     """Checks if the iterator has more elements.
@@ -541,6 +544,7 @@ class GraphVectorStore(VectorStore):
                 depth=depth,
                 lambda_mult=lambda_mult,
                 score_threshold=score_threshold,
+                metadata_filter=metadata_filter,
                 **kwargs,
             )
         )
@@ -564,6 +568,11 @@ class GraphVectorStore(VectorStore):
         lambda_mult: float = 0.5,
         **kwargs: Any,
     ) -> list[Document]:
+        if kwargs.get('depth', 0) > 0:
+                logger.warning(
+                        "'mmr' search started with depth > 0. "
+                        "Maybe you meant to do a 'mmr_traversal' search?"
+                    )
         return list(
             self.mmr_traversal_search(
                 query, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult, depth=0
@@ -593,7 +602,7 @@ class GraphVectorStore(VectorStore):
             raise ValueError(
                 f"search_type of {search_type} not allowed. Expected "
                 "search_type to be 'similarity', 'similarity_score_threshold', "
-                "'mmr' or 'traversal'."
+                "'mmr', 'traversal', or 'mmr_traversal'."
             )
 
     async def asearch(
@@ -610,11 +619,13 @@ class GraphVectorStore(VectorStore):
             return await self.amax_marginal_relevance_search(query, **kwargs)
         elif search_type == "traversal":
             return [doc async for doc in self.atraversal_search(query, **kwargs)]
+        elif search_type == "mmr_traversal":
+            return list(self.ammr_traversal_search(query, **kwargs))
         else:
             raise ValueError(
                 f"search_type of {search_type} not allowed. Expected "
                 "search_type to be 'similarity', 'similarity_score_threshold', "
-                "'mmr' or 'traversal'."
+                "'mmr', 'traversal', or 'mmr_traversal'."
             )
 
     def as_retriever(self, **kwargs: Any) -> GraphVectorStoreRetriever:
@@ -626,13 +637,14 @@ class GraphVectorStore(VectorStore):
 
                 - search_type (Optional[str]): Defines the type of search that
                   the Retriever should perform.
-                  Can be ``traversal`` (default), ``similarity``, ``mmr``, or
-                  ``similarity_score_threshold``.
+                  Can be ``traversal`` (default), ``similarity``, ``mmr``,
+                   ``mmr_traversal``, or ``similarity_score_threshold``.
                 - search_kwargs (Optional[Dict]): Keyword arguments to pass to the
                   search function. Can include things like:
 
                   - k(int): Amount of documents to return (Default: 4).
                   - depth(int): The maximum depth of edges to traverse (Default: 1).
+                    Only applies to search_type: ``traversal`` and ``mmr_traversal``.
                   - score_threshold(float): Minimum relevance threshold
                     for similarity_score_threshold.
                   - fetch_k(int): Amount of documents to pass to MMR algorithm
@@ -649,21 +661,21 @@ class GraphVectorStore(VectorStore):
             # Retrieve documents traversing edges
             docsearch.as_retriever(
                 search_type="traversal",
-                search_kwargs={'k': 6, 'depth': 3}
+                search_kwargs={'k': 6, 'depth': 2}
             )
 
             # Retrieve more documents with higher diversity
             # Useful if your dataset has many similar documents
             docsearch.as_retriever(
-                search_type="mmr",
-                search_kwargs={'k': 6, 'lambda_mult': 0.25}
+                search_type="mmr_traversal",
+                search_kwargs={'k': 6, 'lambda_mult': 0.25, 'depth': 2}
             )
 
             # Fetch more documents for the MMR algorithm to consider
             # But only return the top 5
             docsearch.as_retriever(
                 search_type="mmr",
-                search_kwargs={'k': 5, 'fetch_k': 50}
+                search_kwargs={'k': 5, 'fetch_k': 50, 'depth': 2}
             )
 
             # Only retrieve documents that have a relevance score

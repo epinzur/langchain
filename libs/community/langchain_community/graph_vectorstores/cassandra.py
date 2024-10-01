@@ -568,9 +568,12 @@ class CassandraGraphVectorStore(GraphVectorStore):
                             depths[adjacent_node.id] = next_depth
                 helper.add_candidates(new_candidates)
 
-        for id in helper.selected_ids:
+        for id, similarity_score, mmr_score in zip(helper.selected_ids, helper.selected_similarity_scores, helper.selected_mmr_scores):
             if id in retrieved_docs:
-                yield _restore_links(retrieved_docs[id])
+                doc = _restore_links(retrieved_docs[id])
+                doc.metadata["similarity_score"] = similarity_score
+                doc.metadata["mmr_score"] = mmr_score
+                yield doc
             else:
                 raise Exception(f"unexpected. retrieved_docs should contain id: {id}")
 
