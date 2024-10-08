@@ -1,3 +1,5 @@
+"""Tools for the Graph Traversal Maximal Marginal Relevance (MMR) reranking."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -5,7 +7,7 @@ from typing import TYPE_CHECKING, Iterable
 
 import numpy as np
 
-from ragstack_knowledge_store.math import cosine_similarity
+from langchain_community.utils.math import cosine_similarity
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -100,6 +102,7 @@ class MmrHelper:
         lambda_mult: float = 0.5,
         score_threshold: float = NEG_INF,
     ) -> None:
+        """Create a new Traversal MMR helper."""
         self.query_embedding = _emb_to_ndarray(query_embedding)
         self.dimensions = self.query_embedding.shape[1]
 
@@ -118,7 +121,7 @@ class MmrHelper:
 
         # List of the candidates.
         self.candidates = []
-        # ND array of the candidate embeddings.
+        # numpy n-dimensional array of the candidate embeddings.
         self.candidate_embeddings = np.ndarray((0, self.dimensions), dtype=np.float32)
 
         self.best_score = NEG_INF
@@ -261,3 +264,4 @@ class MmrHelper:
         self.candidate_embeddings = np.vstack(
             (self.candidate_embeddings, new_embeddings)
         )
+
