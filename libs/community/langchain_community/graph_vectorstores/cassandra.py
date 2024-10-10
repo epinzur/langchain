@@ -11,36 +11,26 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncIterable,
-    Dict,
     Iterable,
-    List,
-    Optional,
     Sequence,
-    Set,
-    Tuple,
-    Type,
     cast,
 )
 
 from cassio.table.mixins.metadata import MetadataMixin
 from langchain_core._api import beta
 from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
 from typing_extensions import override
 
-from langchain_community.graph_vectorstores.base import (
-    METADATA_LINKS_KEY,
-    GraphVectorStore,
-    Link,
-    Node,
-)
-from langchain_community.utilities.cassandra import SetupMode
+from langchain_community.graph_vectorstores.base import GraphVectorStore, Node
+from langchain_community.graph_vectorstores.links import METADATA_LINKS_KEY, Link
+from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
 from langchain_community.vectorstores.cassandra import Cassandra as CassandraVectorStore
-
-from langchain_community.graph_vectorstores._mmr_helper import MmrHelper
 
 if TYPE_CHECKING:
     from cassandra.cluster import Session
+    from langchain_core.embeddings import Embeddings
+
+    from langchain_community.utilities.cassandra import SetupMode
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +40,8 @@ class AdjacentNode:
     links: list[Link]
     embedding: list[float]
 
-    def __init__(self, node: Node, embedding: List[float]) -> None:
+    def __init__(self, node: Node, embedding: list[float]) -> None:
+        """Create an Adjacent Node."""
         self.id = node.id or ""
         self.links = node.links
         self.embedding = embedding
@@ -65,7 +56,7 @@ def _serialize_metadata(md: dict[str, Any]) -> str:
 
 def _serialize_links(links: list[Link]) -> str:
     class SetAndLinkEncoder(json.JSONEncoder):
-        def default(self, obj: Any) -> Any:
+        def default(self, obj: Any) -> Any:  # noqa: ANN401
             if not isinstance(obj, type) and is_dataclass(obj):
                 return asdict(obj)
 
@@ -85,11 +76,11 @@ def _deserialize_links(json_blob: str | None) -> set[Link]:
     }
 
 
-def _metadata_s_link_key(link: Link) -> str:
+def _metadata_link_key(link: Link) -> str:
     return f"link:{link.kind}:{link.tag}"
 
 
-def _metadata_s_link_value() -> str:
+def _metadata_link_value() -> str:
     return "link"
 
 
@@ -107,14 +98,11 @@ def _doc_to_node(doc: Document) -> Node:
 
 
 def _incoming_links(node: Node | AdjacentNode) -> set[Link]:
-    return set([link for link in node.links if link.direction in ["in", "bidir"]])
+    return {link for link in node.links if link.direction in ["in", "bidir"]}
 
 
 def _outgoing_links(node: Node | AdjacentNode) -> set[Link]:
-    return set([link for link in node.links if link.direction in ["out", "bidir"]])
-
-
-
+    return {link for link in node.links if link.direction in ["out", "bidir"]}
 
 
 @beta()
@@ -122,13 +110,12 @@ class CassandraGraphVectorStore(GraphVectorStore):
     def __init__(
         self,
         embedding: Embeddings,
-        session: Optional[Session] = None,
-        keyspace: Optional[str] = None,
+        session: Session | None = None,
+        keyspace: str | None = None,
         table_name: str = "",
-        metadata_links_key: str = METADATA_LINKS_KEY,
-        ttl_seconds: Optional[int] = None,
+        ttl_seconds: int | None = None,
         *,
-        body_index_options: Optional[List[Tuple[str, Any]]] = None,
+        body_index_options: list[tuple[str, Any]] | None = None,
         setup_mode: SetupMode = SetupMode.SYNC,
         metadata_deny_list: Iterable[str] = [],
     ) -> None:
@@ -161,8 +148,6 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 cassio.
             keyspace: Cassandra keyspace. If not provided, it is resolved from cassio.
             table_name: Cassandra table (required).
-            metadata_links_key: document metadata key where all the links are
-                stored.
             ttl_seconds: Optional time-to-live for the added texts.
             body_index_options: Optional options used to create the body index.
                 Eg. body_index_options = [cassio.table.cql.STANDARD_ANALYZER]
@@ -178,13 +163,13 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 exposed since CassandraGraphVectorStore only supports the
                 deny_list option.
         """
-        self.metadata_links_key = metadata_links_key
+        self.embedding = embedding
 
         deny_list = set(metadata_deny_list)
-        deny_list.add(self.metadata_links_key)
+        deny_list.add(METADATA_LINKS_KEY)
         self._metadata_deny_list = deny_list
 
-        self.store = CassandraVectorStore(
+        self.vector_store = CassandraVectorStore(
             embedding=embedding,
             session=session,
             keyspace=keyspace,
@@ -195,7 +180,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
             metadata_indexing=("deny_list", deny_list),
         )
 
-        store_session: Session = self.store.session
+        store_session: Session = self.vector_store.session
 
         self._insert_node = store_session.prepare(
             f"""
@@ -205,11 +190,10 @@ class CassandraGraphVectorStore(GraphVectorStore):
             """  # noqa: S608
         )
 
-
     @property
     @override
-    def embeddings(self) -> Optional[Embeddings]:
-        return self.store.embedding
+    def embeddings(self) -> Embeddings:
+        return self.embedding
 
     def _get_metadata_filter(
         self,
@@ -220,12 +204,11 @@ class CassandraGraphVectorStore(GraphVectorStore):
             return metadata or {}
 
         metadata_filter = {} if metadata is None else metadata.copy()
-        metadata_filter[_metadata_s_link_key(link=outgoing_link)] = _metadata_s_link_value()
+        metadata_filter[_metadata_link_key(link=outgoing_link)] = _metadata_link_value()
         return metadata_filter
 
     def _restore_links(self, doc: Document) -> Document:
-        """
-        Restores the links in the document by deserializing the links from the metadata.
+        """Restores the links in the document by deserializing them from metadata.
 
         Args:
             doc: A single Document
@@ -233,8 +216,8 @@ class CassandraGraphVectorStore(GraphVectorStore):
         Returns:
             The same Document with restored links.
         """
-        links = _deserialize_links(doc.metadata.get(self.metadata_links_key))
-        doc.metadata[self.metadata_links_key] = links
+        links = _deserialize_links(doc.metadata.get(METADATA_LINKS_KEY))
+        doc.metadata[METADATA_LINKS_KEY] = links
         return doc
 
     # TODO: Async (aadd_nodes)
@@ -244,7 +227,12 @@ class CassandraGraphVectorStore(GraphVectorStore):
         nodes: Iterable[Node],
         **kwargs: Any,
     ) -> Iterable[str]:
-        """Add nodes to the graph store."""
+        """Add nodes to the graph store.
+
+        Args:
+            nodes: the nodes to add.
+            **kwargs: Additional keyword arguments.
+        """
         node_ids: list[str] = []
         texts: list[str] = []
         metadata_list: list[dict[str, Any]] = []
@@ -260,10 +248,10 @@ class CassandraGraphVectorStore(GraphVectorStore):
             metadata_list.append(combined_metadata)
             incoming_links_list.append(_incoming_links(node=node))
 
-        text_embeddings = self.store.embedding.embed_documents(texts)
+        text_embeddings = self.embedding.embed_documents(texts)
 
         futures = []
-        store_session: Session = self.store.session
+        store_session: Session = self.vector_store.session
         tuples = zip(
             node_ids, texts, text_embeddings, metadata_list, incoming_links_list
         )
@@ -275,8 +263,8 @@ class CassandraGraphVectorStore(GraphVectorStore):
             }
 
             for incoming_link in incoming_links:
-                metadata_s[_metadata_s_link_key(link=incoming_link)] = (
-                    _metadata_s_link_value()
+                metadata_s[_metadata_link_key(link=incoming_link)] = (
+                    _metadata_link_value()
                 )
 
             attributes_blob = _serialize_metadata(metadata)
@@ -303,11 +291,11 @@ class CassandraGraphVectorStore(GraphVectorStore):
     @classmethod
     @override
     def from_texts(
-        cls: Type["CassandraGraphVectorStore"],
+        cls: type["CassandraGraphVectorStore"],
         texts: Iterable[str],
         embedding: Embeddings,
-        metadatas: Optional[List[dict]] = None,
-        ids: Optional[Iterable[str]] = None,
+        metadatas: list[dict] | None = None,
+        ids: Iterable[str] | None = None,
         **kwargs: Any,
     ) -> "CassandraGraphVectorStore":
         """Return CassandraGraphVectorStore initialized from texts and embeddings."""
@@ -318,14 +306,13 @@ class CassandraGraphVectorStore(GraphVectorStore):
     @classmethod
     @override
     def from_documents(
-        cls: Type["CassandraGraphVectorStore"],
+        cls: type["CassandraGraphVectorStore"],
         documents: Iterable[Document],
         embedding: Embeddings,
-        ids: Optional[Iterable[str]] = None,
+        ids: Iterable[str] | None = None,
         **kwargs: Any,
     ) -> "CassandraGraphVectorStore":
-        """Return CassandraGraphVectorStore initialized from documents and
-        embeddings."""
+        """Return CassandraGraphVectorStore initialized from docs and embeddings."""
         store = cls(embedding=embedding, **kwargs)
         store.add_documents(documents, ids=ids)
         return store
@@ -335,15 +322,26 @@ class CassandraGraphVectorStore(GraphVectorStore):
         self,
         query: str,
         k: int = 4,
-        metadata_filter: dict[str, Any] = {},
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
+        """Retrieve documents from this graph store.
+
+        Args:
+            query: The query string.
+            k: The number of Documents to return. Defaults to 4.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Collection of retrieved documents.
+        """
         return [
             self._restore_links(doc)
-            for doc in self.store.similarity_search(
+            for doc in self.vector_store.similarity_search(
                 query=query,
                 k=k,
-                filter=metadata_filter,
+                filter=filter,
                 **kwargs,
             )
         ]
@@ -353,15 +351,26 @@ class CassandraGraphVectorStore(GraphVectorStore):
         self,
         query: str,
         k: int = 4,
-        metadata_filter: dict[str, Any] = {},
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
+        """Retrieve documents from this graph store.
+
+        Args:
+            query: The query string.
+            k: The number of Documents to return. Defaults to 4.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Collection of retrieved documents.
+        """
         return [
             self._restore_links(doc)
-            for doc in await self.store.asimilarity_search(
+            for doc in await self.vector_store.asimilarity_search(
                 query=query,
                 k=k,
-                filter=metadata_filter,
+                filter=filter,
                 **kwargs,
             )
         ]
@@ -369,17 +378,28 @@ class CassandraGraphVectorStore(GraphVectorStore):
     @override
     def similarity_search_by_vector(
         self,
-        embedding: List[float],
+        embedding: list[float],
         k: int = 4,
-        metadata_filter: dict[str, Any] = {},
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
+        """Return docs most similar to embedding vector.
+
+        Args:
+            embedding: Embedding to look up documents similar to.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            **kwargs: Additional arguments are ignored.
+
+        Returns:
+            The list of Documents most similar to the query vector.
+        """
         return [
             self._restore_links(doc)
-            for doc in self.store.similarity_search_by_vector(
+            for doc in self.vector_store.similarity_search_by_vector(
                 embedding,
                 k=k,
-                filter=metadata_filter,
+                filter=filter,
                 **kwargs,
             )
         ]
@@ -387,30 +407,46 @@ class CassandraGraphVectorStore(GraphVectorStore):
     @override
     async def asimilarity_search_by_vector(
         self,
-        embedding: List[float],
+        embedding: list[float],
         k: int = 4,
-        metadata_filter: dict[str, Any] = {},
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
+        """Return docs most similar to embedding vector.
+
+        Args:
+            embedding: Embedding to look up documents similar to.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            **kwargs: Additional arguments are ignored.
+
+        Returns:
+            The list of Documents most similar to the query vector.
+        """
         return [
             self._restore_links(doc)
-            for doc in await self.store.asimilarity_search_by_vector(
+            for doc in await self.vector_store.asimilarity_search_by_vector(
                 embedding,
                 k=k,
-                filter=metadata_filter,
+                filter=filter,
                 **kwargs,
             )
         ]
 
     def metadata_search(
         self,
-        filter: dict[str, Any] = {},  # noqa: B006
+        filter: dict[str, Any] | None = None,  # noqa: A002
         n: int = 5,
     ) -> Iterable[Document]:
-        """Retrieve nodes based on their metadata."""
+        """Get documents via a metadata search.
+
+        Args:
+            filter: the metadata to query for.
+            n: the maximum number of documents to return.
+        """
         return [
             self._restore_links(doc)
-            for doc in self.store.metadata_search(
+            for doc in self.vector_store.metadata_search(
                 filter=filter,
                 n=n,
             )
@@ -418,27 +454,39 @@ class CassandraGraphVectorStore(GraphVectorStore):
 
     async def ametadata_search(
         self,
-        filter: dict[str, Any] = {},  # noqa: B006
+        filter: dict[str, Any] | None = None,  # noqa: A002
         n: int = 5,
     ) -> Iterable[Document]:
-        """Retrieve nodes based on their metadata."""
+        """Get documents via a metadata search.
+
+        Args:
+            filter: the metadata to query for.
+            n: the maximum number of documents to return.
+        """
         return [
             self._restore_links(doc)
-            for doc in await self.store.ametadata_search(
+            for doc in await self.vector_store.ametadata_search(
                 filter=filter,
                 n=n,
             )
         ]
 
-    def get_node(self, id: str) -> Node | None:
-        """Get a node by its id."""
-        doc = self.store.get_by_document_id(document_id=id)
+    def get_node(self, node_id: str) -> Node | None:
+        """Retrieve a single node from the store, given its ID.
+
+        Args:
+            node_id: The node ID
+
+        Returns:
+            The the node if it exists. Otherwise None.
+        """
+        doc = self.vector_store.get_by_document_id(document_id=node_id)
         if doc is None:
             return None
         return _doc_to_node(doc=doc)
 
     @override
-    async def ammr_traversal_search(
+    async def ammr_traversal_search(  # noqa: C901
         self,
         query: str,
         *,
@@ -449,7 +497,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
         adjacent_k: int = 10,
         lambda_mult: float = 0.5,
         score_threshold: float = float("-inf"),
-        metadata_filter: dict[str, Any] = {},  # noqa: B006
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterable[Document]:
         """Retrieve documents from this graph store using MMR-traversal.
@@ -481,9 +529,10 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 diversity and 1 to minimum diversity. Defaults to 0.5.
             score_threshold: Only documents with a score greater than or equal
                 this threshold will be chosen. Defaults to -infinity.
-            metadata_filter: Optional metadata to filter the results.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
         """
-        query_embedding = self.store.embedding.embed_query(query)
+        query_embedding = self.embedding.embed_query(query)
         helper = MmrHelper(
             k=k,
             query_embedding=query_embedding,
@@ -495,7 +544,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
         outgoing_links_map: dict[str, set[Link]] = {}
         visited_links: set[Link] = set()
         # Map from id to Document
-        retrieved_docs: Dict[str, Document] = {}
+        retrieved_docs: dict[str, Document] = {}
 
         async def fetch_neighborhood(neighborhood: Sequence[str]) -> None:
             nonlocal outgoing_links_map, visited_links, retrieved_docs
@@ -515,7 +564,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 links=visited_links,
                 query_embedding=query_embedding,
                 k_per_link=adjacent_k,
-                metadata_filter=metadata_filter,
+                filter=filter,
                 retrieved_docs=retrieved_docs,
             )
 
@@ -531,21 +580,23 @@ class CassandraGraphVectorStore(GraphVectorStore):
         async def fetch_initial_candidates() -> None:
             nonlocal outgoing_links_map, visited_links, retrieved_docs
 
-            results = await self.store.asimilarity_search_with_embedding_id_by_vector(
-                embedding=query_embedding,
-                k=fetch_k,
-                filter=metadata_filter,
+            results = (
+                await self.vector_store.asimilarity_search_with_embedding_id_by_vector(
+                    embedding=query_embedding,
+                    k=fetch_k,
+                    filter=filter,
+                )
             )
 
             candidates: dict[str, list[float]] = {}
-            for doc, embedding, id in results:
-                if id not in retrieved_docs:
-                    retrieved_docs[id] = doc
+            for doc, embedding, doc_id in results:
+                if doc_id not in retrieved_docs:
+                    retrieved_docs[doc_id] = doc
 
-                if id not in outgoing_links_map:
-                    node = _doc_to_node(doc)
-                    outgoing_links_map[id] = _outgoing_links(node=node)
-                    candidates[id] = embedding
+                if doc_id not in outgoing_links_map:
+                    node = self._doc_to_node(doc)
+                    outgoing_links_map[doc_id] = _outgoing_links(node=node)
+                    candidates[doc_id] = embedding
             helper.add_candidates(candidates)
 
         if initial_roots:
@@ -579,7 +630,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
                     links=selected_outgoing_links,
                     query_embedding=query_embedding,
                     k_per_link=adjacent_k,
-                    metadata_filter=metadata_filter,
+                    filter=filter,
                     retrieved_docs=retrieved_docs,
                 )
 
@@ -607,14 +658,19 @@ class CassandraGraphVectorStore(GraphVectorStore):
                             depths[adjacent_node.id] = next_depth
                 helper.add_candidates(new_candidates)
 
-        for id, similarity_score, mmr_score in zip(helper.selected_ids, helper.selected_similarity_scores, helper.selected_mmr_scores):
-            if id in retrieved_docs:
-                doc = self._restore_links(retrieved_docs[id])
+        for doc_id, similarity_score, mmr_score in zip(
+            helper.selected_ids,
+            helper.selected_similarity_scores,
+            helper.selected_mmr_scores,
+        ):
+            if doc_id in retrieved_docs:
+                doc = self._restore_links(retrieved_docs[doc_id])
                 doc.metadata["similarity_score"] = similarity_score
                 doc.metadata["mmr_score"] = mmr_score
                 yield doc
             else:
-                raise Exception(f"unexpected. retrieved_docs should contain id: {id}")
+                msg = f"retrieved_docs should contain id: {doc_id}"
+                raise RuntimeError(msg)
 
     @override
     def mmr_traversal_search(
@@ -628,7 +684,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
         adjacent_k: int = 10,
         lambda_mult: float = 0.5,
         score_threshold: float = float("-inf"),
-        metadata_filter: dict[str, Any] = {},  # noqa: B006
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Iterable[Document]:
         """Retrieve documents from this graph store using MMR-traversal.
@@ -660,7 +716,8 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 diversity and 1 to minimum diversity. Defaults to 0.5.
             score_threshold: Only documents with a score greater than or equal
                 this threshold will be chosen. Defaults to -infinity.
-            metadata_filter: Optional metadata to filter the results.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
         """
 
         async def collect_docs() -> Iterable[Document]:
@@ -673,23 +730,21 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 adjacent_k=adjacent_k,
                 lambda_mult=lambda_mult,
                 score_threshold=score_threshold,
-                metadata_filter=metadata_filter,
+                filter=filter,
+                **kwargs,
             )
-            docs: List[Document] = []
-            async for doc in async_iter:
-                docs.append(doc)
-            return docs
+            return [doc async for doc in async_iter]
 
         return asyncio.run(collect_docs())
 
     @override
-    async def atraversal_search(
+    async def atraversal_search(  # noqa: C901
         self,
         query: str,
         *,
         k: int = 4,
         depth: int = 1,
-        metadata_filter: dict[str, Any] = {},
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterable[Document]:
         """Retrieve documents from this knowledge store.
@@ -703,7 +758,8 @@ class CassandraGraphVectorStore(GraphVectorStore):
             k: The number of Documents to return from the initial vector search.
                 Defaults to 4.
             depth: The maximum depth of edges to traverse. Defaults to 1.
-            metadata_filter: Optional metadata to filter the results.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             Collection of retrieved documents.
@@ -720,13 +776,13 @@ class CassandraGraphVectorStore(GraphVectorStore):
         # ...
 
         # Map from visited ID to depth
-        visited_ids: Dict[str, int] = {}
+        visited_ids: dict[str, int] = {}
 
         # Map from visited link to depth
-        visited_links: Dict[Link, int] = {}
+        visited_links: dict[Link, int] = {}
 
         # Map from id to Document
-        retrieved_docs: Dict[str, Document] = {}
+        retrieved_docs: dict[str, Document] = {}
 
         async def visit_nodes(d: int, docs: Iterable[Document]) -> None:
             """Recursively visit nodes and their outgoing links."""
@@ -735,7 +791,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
             # Iterate over nodes, tracking the *new* outgoing links for this
             # depth. These are links that are either new, or newly discovered at a
             # lower depth.
-            outgoing_links: Set[Link] = set()
+            outgoing_links: set[Link] = set()
             for doc in docs:
                 if doc.id is not None:
                     if doc.id not in retrieved_docs:
@@ -761,13 +817,15 @@ class CassandraGraphVectorStore(GraphVectorStore):
             if outgoing_links:
                 metadata_search_tasks = []
                 for outgoing_link in outgoing_links:
-                    filter = self._get_metadata_filter(
-                        metadata=metadata_filter,
+                    metadata_filter = self._get_metadata_filter(
+                        metadata=filter,
                         outgoing_link=outgoing_link,
                     )
                     metadata_search_tasks.append(
                         asyncio.create_task(
-                            self.store.ametadata_search(filter=filter, n=1000)
+                            self.vector_store.ametadata_search(
+                                filter=metadata_filter, n=1000
+                            )
                         )
                     )
                 results = await asyncio.gather(*metadata_search_tasks)
@@ -792,39 +850,44 @@ class CassandraGraphVectorStore(GraphVectorStore):
                         new_ids_at_next_depth.add(doc.id)
 
             if new_ids_at_next_depth:
-                fetch_tasks = []
-                visit_node_tasks = []
-                for id in new_ids_at_next_depth:
-                    if id in retrieved_docs:
-                        visit_node_tasks.append(
-                            visit_nodes(d=d, docs=[retrieved_docs[id]])
-                        )
-                    else:
-                        fetch_task = asyncio.create_task(
-                            self.store.aget_by_document_id(document_id=id)
-                        )
-                        fetch_tasks.append(fetch_task)
+                visit_node_tasks = [
+                    visit_nodes(d=d, docs=[retrieved_docs[doc_id]])
+                    for doc_id in new_ids_at_next_depth
+                    if doc_id in retrieved_docs
+                ]
+
+                fetch_tasks = [
+                    asyncio.create_task(
+                        self.vector_store.aget_by_document_id(document_id=doc_id)
+                    )
+                    for doc_id in new_ids_at_next_depth
+                    if doc_id not in retrieved_docs
+                ]
 
                 new_docs: list[Document | None] = await asyncio.gather(*fetch_tasks)
-                for new_doc in new_docs:
-                    if new_doc is not None:
-                        visit_node_tasks.append(visit_nodes(d=d, docs=[new_doc]))
+
+                visit_node_tasks.extend(
+                    visit_nodes(d=d, docs=[new_doc])
+                    for new_doc in new_docs
+                    if new_doc is not None
+                )
 
                 await asyncio.gather(*visit_node_tasks)
 
         # Start the traversal
-        initial_docs = self.store.similarity_search(
+        initial_docs = self.vector_store.similarity_search(
             query=query,
             k=k,
-            filter=metadata_filter,
+            filter=filter,
         )
         await visit_nodes(d=0, docs=initial_docs)
 
-        for id in visited_ids.keys():
-            if id in retrieved_docs:
-                yield _restore_links(retrieved_docs[id])
+        for doc_id in visited_ids:
+            if doc_id in retrieved_docs:
+                yield self._restore_links(retrieved_docs[doc_id])
             else:
-                raise Exception(f"unexpected. retrieved_docs should contain id: {id}")
+                msg = f"retrieved_docs should contain id: {doc_id}"
+                raise RuntimeError(msg)
 
     @override
     def traversal_search(
@@ -833,7 +896,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
         *,
         k: int = 4,
         depth: int = 1,
-        metadata_filter: dict[str, Any] = {},  # noqa: B006
+        filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Iterable[Document]:
         """Retrieve documents from this knowledge store.
@@ -847,7 +910,8 @@ class CassandraGraphVectorStore(GraphVectorStore):
             k: The number of Documents to return from the initial vector search.
                 Defaults to 4.
             depth: The maximum depth of edges to traverse. Defaults to 1.
-            metadata_filter: Optional metadata to filter the results.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
 
         Returns:
             Collection of retrieved documents.
@@ -858,16 +922,14 @@ class CassandraGraphVectorStore(GraphVectorStore):
                 query=query,
                 k=k,
                 depth=depth,
-                metadata_filter=metadata_filter,
+                filter=filter,
+                **kwargs,
             )
-            docs: List[Document] = []
-            async for doc in async_iter:
-                docs.append(doc)
-            return docs
+            return [doc async for doc in async_iter]
 
         return asyncio.run(collect_docs())
 
-    async def _get_outgoing_links(self, source_ids: Iterable[str]) -> Set[Link]:
+    async def _get_outgoing_links(self, source_ids: Iterable[str]) -> set[Link]:
         """Return the set of outgoing links for the given source IDs asynchronously.
 
         Args:
@@ -881,7 +943,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
 
         # Create coroutine objects without scheduling them yet
         coroutines = [
-            self.store.aget_by_document_id(document_id=source_id)
+            self.vector_store.aget_by_document_id(document_id=source_id)
             for source_id in source_ids
         ]
 
@@ -890,7 +952,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
 
         for doc in docs:
             if doc is not None:
-                node = _doc_to_node(doc=doc)
+                node = self._doc_to_node(doc=doc)
                 links.update(_outgoing_links(node=node))
 
         return links
@@ -899,9 +961,9 @@ class CassandraGraphVectorStore(GraphVectorStore):
         self,
         links: set[Link],
         query_embedding: list[float],
-        retrieved_docs: Dict[str, Document],
+        retrieved_docs: dict[str, Document],
         k_per_link: int | None = None,
-        metadata_filter: dict[str, Any] | None = None,
+        filter: dict[str, Any] | None = None,  # noqa: A002
     ) -> Iterable[AdjacentNode]:
         """Return the target nodes with incoming links from any of the given links.
 
@@ -910,35 +972,37 @@ class CassandraGraphVectorStore(GraphVectorStore):
             query_embedding: The query embedding. Used to rank target nodes.
             retrieved_docs: A cache of retrieved docs. This will be added to.
             k_per_link: The number of target nodes to fetch for each link.
-            metadata_filter: Optional metadata to filter the results.
+            filter: Optional metadata to filter the results.
 
         Returns:
-            List of adjacent edges.
+            Iterable of adjacent edges.
         """
         targets: dict[str, AdjacentNode] = {}
 
         tasks = []
         for link in links:
-            filter = self._get_metadata_filter(
-                metadata=metadata_filter,
+            metadata_filter = self._get_metadata_filter(
+                metadata=filter,
                 outgoing_link=link,
             )
 
             tasks.append(
-                self.store.asimilarity_search_with_embedding_id_by_vector(
-                    embedding=query_embedding, k=k_per_link or 10, filter=filter
+                self.vector_store.asimilarity_search_with_embedding_id_by_vector(
+                    embedding=query_embedding,
+                    k=k_per_link or 10,
+                    filter=metadata_filter,
                 )
             )
 
         results = await asyncio.gather(*tasks)
 
         for result in results:
-            for doc, embedding, id in result:
-                if id not in retrieved_docs:
-                    retrieved_docs[id] = doc
-                if id not in targets:
+            for doc, embedding, doc_id in result:
+                if doc_id not in retrieved_docs:
+                    retrieved_docs[doc_id] = doc
+                if doc_id not in targets:
                     node = _doc_to_node(doc=doc)
-                    targets[id] = AdjacentNode(node=node, embedding=embedding)
+                    targets[doc_id] = AdjacentNode(node=node, embedding=embedding)
 
         # TODO: Consider a combined limit based on the similarity and/or
         # predicated MMR score?
