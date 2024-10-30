@@ -159,8 +159,14 @@ class Cassandra(VectorStore):
         if self.session is None:
             self.session = self.table.session
 
+    def _get_safe_embedding(self) -> Embeddings:
+        if not self.embedding:
+            msg = "Missing embedding"
+            raise ValueError(msg)
+        return self.embedding
+
     @property
-    def embeddings(self) -> Embeddings:
+    def embeddings(self) -> Optional[Embeddings]:
         return self.embedding
 
     def _select_relevance_score_fn(self) -> Callable[[float], float]:
@@ -557,13 +563,77 @@ class Cassandra(VectorStore):
         rows = await self.table.afind_entries(metadata=filter, n=n)
         return [self._row_to_document(row=row) for row in rows]
 
-    async def asimilarity_search_with_embedding_id_by_vector(
+    def similarity_search_with_embedding(
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        body_search: Optional[Union[str, List[str]]] = None,
+    ) -> tuple[list[float], list[tuple[Document, list[float]]]]:
+        """Return docs most similar to the query with embedding.
+
+        Also includes the query embedding vector.
+
+        Args:
+            query: Query to look up documents similar to.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            body_search: Document textual search terms to apply.
+                Only supported by Astra DB at the moment.
+
+        Returns:
+            (The query embedding vector, The list of (Document, embedding),
+            the most similar to the query vector.).
+        """
+        query_embedding = self._get_safe_embedding().embed_query(text=query)
+        results = self.similarity_search_with_embedding_by_vector(
+            embedding=query_embedding,
+            k=k,
+            filter=filter,
+            body_search=body_search,
+        )
+
+        return (query_embedding, results)
+
+    async def asimilarity_search_with_embedding(
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        body_search: Optional[Union[str, List[str]]] = None,
+    ) -> tuple[list[float], list[tuple[Document, list[float]]]]:
+        """Return docs most similar to the query with embedding.
+
+        Also includes the query embedding vector.
+
+        Args:
+            query: Query to look up documents similar to.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            body_search: Document textual search terms to apply.
+                Only supported by Astra DB at the moment.
+
+        Returns:
+            (The query embedding vector, The list of (Document, embedding),
+            the most similar to the query vector.).
+        """
+        query_embedding = self._get_safe_embedding().embed_query(text=query)
+        results = await self.asimilarity_search_with_embedding_by_vector(
+            embedding=query_embedding,
+            k=k,
+            filter=filter,
+            body_search=body_search,
+        )
+
+        return (query_embedding, results)
+
+    def similarity_search_with_embedding_by_vector(
         self,
         embedding: List[float],
         k: int = 4,
         filter: Optional[Dict[str, str]] = None,
         body_search: Optional[Union[str, List[str]]] = None,
-    ) -> List[Tuple[Document, List[float], str]]:
+    ) -> List[Tuple[Document, List[float]]]:
         """Return docs most similar to embedding vector.
 
         Args:
@@ -573,7 +643,44 @@ class Cassandra(VectorStore):
             body_search: Document textual search terms to apply.
                 Only supported by Astra DB at the moment.
         Returns:
-            List of (Document, embedding, id), the most similar to the query vector.
+            List of (Document, embedding), the most similar to the query vector.
+        """
+        kwargs: Dict[str, Any] = {}
+        if filter is not None:
+            kwargs["metadata"] = filter
+        if body_search is not None:
+            kwargs["body_search"] = body_search
+
+        hits = self.table.ann_search(
+            vector=embedding,
+            n=k,
+            **kwargs,
+        )
+        return [
+            (
+                self._row_to_document(row=hit),
+                hit["vector"],
+            )
+            for hit in hits
+        ]
+
+    async def asimilarity_search_with_embedding_by_vector(
+        self,
+        embedding: List[float],
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        body_search: Optional[Union[str, List[str]]] = None,
+    ) -> List[Tuple[Document, List[float]]]:
+        """Return docs most similar to embedding vector.
+
+        Args:
+            embedding: Embedding to look up documents similar to.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            body_search: Document textual search terms to apply.
+                Only supported by Astra DB at the moment.
+        Returns:
+            List of (Document, embedding), the most similar to the query vector.
         """
         kwargs: Dict[str, Any] = {}
         if filter is not None:
@@ -590,7 +697,6 @@ class Cassandra(VectorStore):
             (
                 self._row_to_document(row=hit),
                 hit["vector"],
-                hit["row_id"],
             )
             for hit in hits
         ]

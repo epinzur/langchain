@@ -144,7 +144,6 @@ from langchain_community.graph_vectorstores.cassandra import CassandraGraphVecto
 from langchain_community.graph_vectorstores.links import (
     Link,
 )
-from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
 
 __all__ = [
     "GraphVectorStore",
@@ -152,5 +151,4 @@ __all__ = [
     "Node",
     "Link",
     "CassandraGraphVectorStore",
-    "MmrHelper",
 ]

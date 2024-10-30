@@ -11,7 +11,7 @@ from typing import (
     cast,
 )
 
-from langchain_core._api import beta
+from langchain_core._api import beta, deprecated
 from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
@@ -22,19 +22,22 @@ from langchain_core.runnables import run_in_executor
 from langchain_core.vectorstores import VectorStore, VectorStoreRetriever
 from pydantic import Field
 
-from langchain_community.graph_vectorstores.links import METADATA_LINKS_KEY, Link
+from langchain_community.graph_vectorstores.links import (
+    METADATA_LINKS_KEY,
+    Link,
+    add_links,
+)
 
 logger = logging.getLogger(__name__)
 
-
-def _has_next(iterator: Iterator) -> bool:
-    """Checks if the iterator has more elements.
-    Warning: consumes an element from the iterator"""
-    sentinel = object()
-    return next(iterator, sentinel) is not sentinel
+NODE_CLASS_DEPRECATED_SINCE = "0.3.5"
 
 
-@beta()
+@deprecated(
+    since=NODE_CLASS_DEPRECATED_SINCE,
+    pending=True,
+    alternative="langchain_core.documents.Document",
+)
 class Node(Serializable):
     """Node in the GraphVectorStore.
 
@@ -73,11 +76,18 @@ class Node(Serializable):
     """Links associated with the node."""
 
 
-def _texts_to_nodes(
+def _has_next(iterator: Iterator) -> bool:
+    """Checks if the iterator has more elements.
+    Warning: consumes an element from the iterator"""
+    sentinel = object()
+    return next(iterator, sentinel) is not sentinel
+
+
+def _texts_to_documents(
     texts: Iterable[str],
     metadatas: Optional[Iterable[dict]],
     ids: Optional[Iterable[str]],
-) -> Iterator[Node]:
+) -> Iterator[Document]:
     metadatas_it = iter(metadatas) if metadatas else None
     ids_it = iter(ids) if ids else None
     for text in texts:
@@ -89,15 +99,10 @@ def _texts_to_nodes(
             _id = next(ids_it) if ids_it else None
         except StopIteration as e:
             raise ValueError("texts iterable longer than ids") from e
-
-        links = _metadata.pop(METADATA_LINKS_KEY, [])
-        if not isinstance(links, list):
-            links = list(links)
-        yield Node(
+        yield Document(
+            page_content=text,
             id=_id,
             metadata=_metadata,
-            text=text,
-            links=links,
         )
     if ids_it and _has_next(ids_it):
         raise ValueError("ids iterable longer than texts")
@@ -105,21 +110,8 @@ def _texts_to_nodes(
         raise ValueError("metadatas iterable longer than texts")
 
 
-def _documents_to_nodes(documents: Iterable[Document]) -> Iterator[Node]:
-    for doc in documents:
-        metadata = doc.metadata.copy()
-        links = metadata.pop(METADATA_LINKS_KEY, [])
-        if not isinstance(links, list):
-            links = list(links)
-        yield Node(
-            id=doc.id,
-            metadata=metadata,
-            text=doc.page_content,
-            links=links,
-        )
-
-
 @beta()
+@deprecated(since="0.3.5", pending=True)
 def nodes_to_documents(nodes: Iterable[Node]) -> Iterator[Document]:
     """Convert nodes to documents.
 
@@ -143,6 +135,19 @@ def nodes_to_documents(nodes: Iterable[Node]) -> Iterator[Document]:
         )
 
 
+def _nodes_to_documents(
+    nodes: Iterable[Node],
+) -> Iterator[Document]:
+    for node in nodes:
+        doc = Document(
+            page_content=node.text,
+            id=node.id,
+            metadata=node.metadata,
+        )
+        add_links(doc, node.links)
+        yield doc
+
+
 @beta(message="Added in version 0.3.1 of langchain_community. API subject to change.")
 class GraphVectorStore(VectorStore):
     """A hybrid vector-and-graph graph store.
@@ -153,7 +158,9 @@ class GraphVectorStore(VectorStore):
     .. versionadded:: 0.3.1
     """
 
-    @abstractmethod
+    @deprecated(
+        since=NODE_CLASS_DEPRECATED_SINCE, pending=True, alternative="add_documents"
+    )
     def add_nodes(
         self,
         nodes: Iterable[Node],
@@ -165,7 +172,12 @@ class GraphVectorStore(VectorStore):
             nodes: the nodes to add.
             **kwargs: Additional keyword arguments.
         """
+        docs = _nodes_to_documents(nodes=nodes)
+        return self.add_documents(documents=docs, **kwargs)
 
+    @deprecated(
+        since=NODE_CLASS_DEPRECATED_SINCE, pending=True, alternative="aadd_documents"
+    )
     async def aadd_nodes(
         self,
         nodes: Iterable[Node],
@@ -180,10 +192,10 @@ class GraphVectorStore(VectorStore):
         iterator = iter(await run_in_executor(None, self.add_nodes, nodes, **kwargs))
         done = object()
         while True:
-            doc = await run_in_executor(None, next, iterator, done)
-            if doc is done:
+            doc_id = await run_in_executor(None, next, iterator, done)
+            if doc_id is done:
                 break
-            yield doc  # type: ignore[misc]
+            yield doc_id  # type: ignore[misc]
 
     def add_texts(
         self,
@@ -193,10 +205,10 @@ class GraphVectorStore(VectorStore):
         ids: Optional[Iterable[str]] = None,
         **kwargs: Any,
     ) -> list[str]:
-        """Run more texts through the embeddings and add to the vector store.
+        """Run more texts through the embeddings and add to the graph vector store.
 
         The Links present in the metadata field `links` will be extracted to create
-        the `Node` links.
+        the node links.
 
         Eg if nodes `a` and `b` are connected over a hyperlink `https://some-url`, the
         function call would look like:
@@ -221,7 +233,7 @@ class GraphVectorStore(VectorStore):
             )
 
         Args:
-            texts: Iterable of strings to add to the vector store.
+            texts: Iterable of strings to add to the graph vector store.
             metadatas: Optional list of metadatas associated with the texts.
                 The metadata key `links` shall be an iterable of
                 :py:class:`~langchain_community.graph_vectorstores.links.Link`.
@@ -231,8 +243,8 @@ class GraphVectorStore(VectorStore):
         Returns:
             List of ids from adding the texts into the vector store.
         """
-        nodes = _texts_to_nodes(texts, metadatas, ids)
-        return list(self.add_nodes(nodes, **kwargs))
+        docs = _texts_to_documents(texts, metadatas, ids)
+        return list(self.add_documents(documents=docs, **kwargs))
 
     async def aadd_texts(
         self,
@@ -242,10 +254,10 @@ class GraphVectorStore(VectorStore):
         ids: Optional[Iterable[str]] = None,
         **kwargs: Any,
     ) -> list[str]:
-        """Run more texts through the embeddings and add to the vector store.
+        """Run more texts through the embeddings and add to the graph vector store.
 
         The Links present in the metadata field `links` will be extracted to create
-        the `Node` links.
+        the node links.
 
         Eg if nodes `a` and `b` are connected over a hyperlink `https://some-url`, the
         function call would look like:
@@ -270,7 +282,7 @@ class GraphVectorStore(VectorStore):
             )
 
         Args:
-            texts: Iterable of strings to add to the vector store.
+            texts: Iterable of strings to add to the graph vector store.
             metadatas: Optional list of metadatas associated with the texts.
                 The metadata key `links` shall be an iterable of
                 :py:class:`~langchain_community.graph_vectorstores.links.Link`.
@@ -280,18 +292,19 @@ class GraphVectorStore(VectorStore):
         Returns:
             List of ids from adding the texts into the vector store.
         """
-        nodes = _texts_to_nodes(texts, metadatas, ids)
-        return [_id async for _id in self.aadd_nodes(nodes, **kwargs)]
+        docs = _texts_to_documents(texts, metadatas, ids)
+        return [_id for _id in await self.aadd_documents(documents=docs, **kwargs)]
 
+    @abstractmethod
     def add_documents(
         self,
         documents: Iterable[Document],
         **kwargs: Any,
     ) -> list[str]:
-        """Run more documents through the embeddings and add to the vector store.
+        """Run more documents through the embeddings and add to the graph vector store.
 
         The Links present in the document metadata field `links` will be extracted to
-        create the `Node` links.
+        create the node links.
 
         Eg if nodes `a` and `b` are connected over a hyperlink `https://some-url`, the
         function call would look like:
@@ -323,25 +336,23 @@ class GraphVectorStore(VectorStore):
             )
 
         Args:
-            documents: Documents to add to the vector store.
+            documents: Documents to add to the graph vector store.
                 The document's metadata key `links` shall be an iterable of
                 :py:class:`~langchain_community.graph_vectorstores.links.Link`.
 
         Returns:
             List of IDs of the added texts.
         """
-        nodes = _documents_to_nodes(documents)
-        return list(self.add_nodes(nodes, **kwargs))
 
     async def aadd_documents(
         self,
         documents: Iterable[Document],
         **kwargs: Any,
     ) -> list[str]:
-        """Run more documents through the embeddings and add to the vector store.
+        """Run more documents through the embeddings and add to the graph vector store.
 
         The Links present in the document metadata field `links` will be extracted to
-        create the `Node` links.
+        create the node links.
 
         Eg if nodes `a` and `b` are connected over a hyperlink `https://some-url`, the
         function call would look like:
@@ -373,15 +384,14 @@ class GraphVectorStore(VectorStore):
             )
 
         Args:
-            documents: Documents to add to the vector store.
+            documents: Documents to add to the graph vector store.
                 The document's metadata key `links` shall be an iterable of
                 :py:class:`~langchain_community.graph_vectorstores.links.Link`.
 
         Returns:
             List of IDs of the added texts.
         """
-        nodes = _documents_to_nodes(documents)
-        return [_id async for _id in self.aadd_nodes(nodes, **kwargs)]
+        return await run_in_executor(None, self.add_documents, documents, **kwargs)
 
     @abstractmethod
     def traversal_search(
@@ -393,7 +403,7 @@ class GraphVectorStore(VectorStore):
         filter: dict[str, Any] | None = None,  # noqa: A002
         **kwargs: Any,
     ) -> Iterable[Document]:
-        """Retrieve documents from traversing this graph store.
+        """Retrieve documents from traversing this graph vector store.
 
         First, `k` nodes are retrieved using a search for each `query` string.
         Then, additional nodes are discovered up to the given `depth` from those
@@ -419,7 +429,7 @@ class GraphVectorStore(VectorStore):
         filter: dict[str, Any] | None = None,  # noqa: A002
         **kwargs: Any,
     ) -> AsyncIterable[Document]:
-        """Retrieve documents from traversing this graph store.
+        """Retrieve documents from traversing this graph vector store.
 
         First, `k` nodes are retrieved using a search for each `query` string.
         Then, additional nodes are discovered up to the given `depth` from those
@@ -468,7 +478,7 @@ class GraphVectorStore(VectorStore):
         filter: dict[str, Any] | None = None,  # noqa: A002
         **kwargs: Any,
     ) -> Iterable[Document]:
-        """Retrieve documents from this graph store using MMR-traversal.
+        """Retrieve documents from this graph vector store using MMR-traversal.
 
         This strategy first retrieves the top `fetch_k` results by similarity to
         the question. It then selects the top `k` results based on
@@ -514,7 +524,7 @@ class GraphVectorStore(VectorStore):
         filter: dict[str, Any] | None = None,  # noqa: A002
         **kwargs: Any,
     ) -> AsyncIterable[Document]:
-        """Retrieve documents from this graph store using MMR-traversal.
+        """Retrieve documents from this graph vector store using MMR-traversal.
 
         This strategy first retrieves the top `fetch_k` results by similarity to
         the question. It then selects the top `k` results based on
@@ -571,7 +581,14 @@ class GraphVectorStore(VectorStore):
     def similarity_search(
         self, query: str, k: int = 4, **kwargs: Any
     ) -> list[Document]:
-        return list(self.traversal_search(query, k=k, depth=0))
+        return list(self.traversal_search(query, k=k, depth=0, **kwargs))
+
+    async def asimilarity_search(
+        self, query: str, k: int = 4, **kwargs: Any
+    ) -> list[Document]:
+        return [
+            doc async for doc in self.atraversal_search(query, k=k, depth=0, **kwargs)
+        ]
 
     def max_marginal_relevance_search(
         self,
@@ -588,14 +605,29 @@ class GraphVectorStore(VectorStore):
             )
         return list(
             self.mmr_traversal_search(
-                query, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult, depth=0
+                query, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult, depth=0, **kwargs
             )
         )
 
-    async def asimilarity_search(
-        self, query: str, k: int = 4, **kwargs: Any
+    async def amax_marginal_relevance_search(
+        self,
+        query: str,
+        k: int = 4,
+        fetch_k: int = 20,
+        lambda_mult: float = 0.5,
+        **kwargs: Any,
     ) -> list[Document]:
-        return [doc async for doc in self.atraversal_search(query, k=k, depth=0)]
+        if kwargs.get("depth", 0) > 0:
+            logger.warning(
+                "'mmr' search started with depth > 0. "
+                "Maybe you meant to do a 'ammr_traversal' search?"
+            )
+        return [
+            doc
+            async for doc in self.ammr_traversal_search(
+                query, k=k, fetch_k=fetch_k, lambda_mult=lambda_mult, depth=0, **kwargs
+            )
+        ]
 
     def search(self, query: str, search_type: str, **kwargs: Any) -> list[Document]:
         if search_type == "similarity":
@@ -642,7 +674,7 @@ class GraphVectorStore(VectorStore):
             )
 
     def as_retriever(self, **kwargs: Any) -> GraphVectorStoreRetriever:
-        """Return GraphVectorStoreRetriever initialized from this GraphVectorStore.
+        """Return GraphVectorStoreRetriever initialized from this graph vector store.
 
         Args:
             **kwargs: Keyword arguments to pass to the search function.
@@ -665,7 +697,7 @@ class GraphVectorStore(VectorStore):
                   - lambda_mult(float): Diversity of results returned by MMR;
                     1 for minimum diversity and 0 for maximum. (Default: 0.5).
         Returns:
-            Retriever for this GraphVectorStore.
+            Retriever for this graph vector store.
 
         Examples:
 
