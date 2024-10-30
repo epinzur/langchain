@@ -5,6 +5,8 @@ from typing import Literal, Union
 from langchain_core._api import beta
 from langchain_core.documents import Document
 
+METADATA_LINKS_KEY = "links"
+
 
 @beta()
 @dataclass(frozen=True)
@@ -156,9 +158,6 @@ class Link:
         return Link(kind=kind, direction="bidir", tag=tag)
 
 
-METADATA_LINKS_KEY = "links"
-
-
 @beta()
 def get_links(doc: Document) -> list[Link]:
     """Get the links from a document.
@@ -168,7 +167,6 @@ def get_links(doc: Document) -> list[Link]:
     Returns:
         The set of link tags from the document.
     """
-
     links = doc.metadata.setdefault(METADATA_LINKS_KEY, [])
     if not isinstance(links, list):
         # Convert to a list and remember that.
@@ -185,6 +183,9 @@ def add_links(doc: Document, *links: Union[Link, Iterable[Link]]) -> None:
         doc: The document to add the links to.
         *links: The links to add to the document.
     """
+    if not any(links):
+        return
+
     links_in_metadata = get_links(doc)
     for link in links:
         if isinstance(link, Iterable):
@@ -218,3 +219,19 @@ def copy_with_links(doc: Document, *links: Union[Link, Iterable[Link]]) -> Docum
             METADATA_LINKS_KEY: list(new_links),
         },
     )
+
+
+@beta()
+def incoming_links(links: Iterable[Link]) -> Iterable[Link]:
+    """Filter links to only the incoming links"""
+    for link in links:
+        if link.direction in ["in", "bidir"]:
+            yield link
+
+
+@beta()
+def outgoing_links(links: Iterable[Link]) -> Iterable[Link]:
+    """Filter links to only the outgoing links"""
+    for link in links:
+        if link.direction in ["out", "bidir"]:
+            yield link
