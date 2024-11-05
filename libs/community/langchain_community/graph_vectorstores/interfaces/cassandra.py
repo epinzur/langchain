@@ -1,3 +1,5 @@
+"""Interface to support Cassandra-based graph vector store integrations."""
+
 from typing import (
     Any,
     Dict,
@@ -12,7 +14,7 @@ from typing import (
 from langchain_core.documents import Document
 
 
-class CassandraVectorStoreForGraphInterface(Protocol):
+class CassandraGraphInterface(Protocol):
     def similarity_search_with_embedding(
         self,
         query: str,
