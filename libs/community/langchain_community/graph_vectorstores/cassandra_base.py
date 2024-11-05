@@ -12,11 +12,11 @@ from langchain_core.vectorstores import VectorStore
 from typing_extensions import override
 
 from langchain_community.graph_vectorstores.base import GraphVectorStore
-from langchain_community.graph_vectorstores.helpers.cassandra_interface import (
-    CassandraVectorStoreForGraphInterface,
+from langchain_community.graph_vectorstores.interfaces.cassandra import (
+    CassandraGraphInterface,
 )
-from langchain_community.graph_vectorstores.helpers.mmr_helper import MmrHelper
 from langchain_community.graph_vectorstores.links import Link, get_links, outgoing_links
+from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
 
 METADATA_EMBEDDING_KEY = "__embedding"
 
@@ -60,14 +60,12 @@ class DocumentCache:
 
 class CassandraGraphVectorStoreBase(GraphVectorStore):
     vector_store: VectorStore
-    cassandra_vector_store: CassandraVectorStoreForGraphInterface
+    cassandra_vector_store: CassandraGraphInterface
 
     def __init__(self, vector_store: VectorStore):
         super().__init__()
         self.vector_store = vector_store
-        self.cassandra_vector_store = cast(
-            CassandraVectorStoreForGraphInterface, vector_store
-        )
+        self.cassandra_vector_store = cast(CassandraGraphInterface, vector_store)
 
     @abstractmethod
     def get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
