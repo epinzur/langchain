@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import warnings
 from dataclasses import asdict, is_dataclass
 from typing import (
     TYPE_CHECKING,
@@ -18,10 +17,13 @@ from typing import (
     cast,
 )
 
-from langchain_core._api import beta
+from langchain_core._api import beta, deprecated
 from langchain_core.documents import Document
 
-from langchain_community.graph_vectorstores.base import Node
+from langchain_community.graph_vectorstores.base import (
+    NODE_CLASS_DEPRECATED_SINCE,
+    Node,
+)
 from langchain_community.graph_vectorstores.cassandra_base import (
     CassandraGraphVectorStoreBase,
 )
@@ -190,15 +192,12 @@ class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
             metadata[_metadata_link_key(link=incoming_link)] = _metadata_link_value()
         return metadata
 
+    @deprecated(
+        since=NODE_CLASS_DEPRECATED_SINCE,
+        pending=True,
+        alternative="get_document_by_id",
+    )
     def get_node(self, node_id: str) -> Node | None:
-        warnings.warn(
-            (
-                "The 'get_node()' method is deprecated and will be removed soon. "
-                "Use the 'get_by_document_id()' method instead."
-            ),
-            DeprecationWarning,
-            stacklevel=2,
-        )
         """Retrieve a single node from the store, given its ID.
 
         Args:
