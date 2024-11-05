@@ -21,17 +21,17 @@ from langchain_community.graph_vectorstores.links import Link, get_links, outgoi
 METADATA_EMBEDDING_KEY = "__embedding"
 
 
-def get_embedding(doc: Document) -> list[float]:
+def _get_embedding(doc: Document) -> list[float]:
     """Get the embedding from a document."""
     return doc.metadata.get(METADATA_EMBEDDING_KEY, [])
 
 
-def set_embedding(doc: Document, embedding: list[float]) -> None:
+def _set_embedding(doc: Document, embedding: list[float]) -> None:
     """Set the embedding on a document."""
     doc.metadata[METADATA_EMBEDDING_KEY] = embedding
 
 
-def clear_embedding(doc: Document) -> None:
+def _clear_embedding(doc: Document) -> None:
     doc.metadata.pop(METADATA_EMBEDDING_KEY, None)
 
 
@@ -339,7 +339,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
     ) -> list[Document]:
         docs: list[Document] = []
         for doc, embedding in rows:
-            set_embedding(doc=doc, embedding=embedding)
+            _set_embedding(doc=doc, embedding=embedding)
             docs.append(self.restore_links(doc=doc))
         return docs
 
@@ -417,7 +417,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
                 outgoing_links_map[node.id] = set(
                     outgoing_links(links=get_links(doc=node))
                 )
-                candidates[node.id] = get_embedding(doc=node)
+                candidates[node.id] = _get_embedding(doc=node)
         return candidates
 
     @override
@@ -597,7 +597,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         ):
             doc.metadata["similarity_score"] = similarity_score
             doc.metadata["mmr_score"] = mmr_score
-            clear_embedding(doc)
+            _clear_embedding(doc)
             yield doc
 
     @override
@@ -790,7 +790,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         ):
             doc.metadata["similarity_score"] = similarity_score
             doc.metadata["mmr_score"] = mmr_score
-            clear_embedding(doc)
+            _clear_embedding(doc)
             yield doc
 
     def _get_initial(
