@@ -151,7 +151,7 @@ class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
             )
         )
 
-    def get_metadata_filter(
+    def _get_metadata_filter(
         self,
         metadata: dict[str, Any] | None = None,
         outgoing_link: Link | None = None,
@@ -163,7 +163,7 @@ class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
         metadata_filter[_metadata_link_key(link=outgoing_link)] = _metadata_link_value()
         return metadata_filter
 
-    def restore_links(self, doc: Document) -> Document:
+    def _restore_links(self, doc: Document) -> Document:
         """Restores links in a document by deserializing them from metadata.
 
         Args:
@@ -181,7 +181,7 @@ class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
             doc.metadata.pop(incoming_link_key, None)
         return doc
 
-    def get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
+    def _get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
         links = get_links(doc=doc)
         metadata = doc.metadata.copy()
         metadata[METADATA_LINKS_KEY] = _serialize_links(links=links)
