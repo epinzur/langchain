@@ -141,7 +141,7 @@ def graph_vector_store_angular(
     return OpenSearchGraphVectorStore(
         opensearch_url=DEFAULT_OPENSEARCH_URL,
         index_name=index_name,
-        embedding=AngularTwoDimensionalEmbeddings(),
+        embedding_function=AngularTwoDimensionalEmbeddings(),
         reset_index=True,
     )
 
@@ -152,7 +152,7 @@ def graph_vector_store_earth(
     return OpenSearchGraphVectorStore(
         opensearch_url=DEFAULT_OPENSEARCH_URL,
         index_name=index_name,
-        embedding=EarthEmbeddings(),
+        embedding_function=EarthEmbeddings(),
         reset_index=True,
     )
 
@@ -164,7 +164,7 @@ def graph_vector_store_fake(
     return OpenSearchGraphVectorStore(
         opensearch_url=DEFAULT_OPENSEARCH_URL,
         index_name=index_name,
-        embedding=FakeEmbeddings(),
+        embedding_function=FakeEmbeddings(),
         reset_index=True,
     )
 
@@ -177,7 +177,7 @@ def graph_vector_store_d2(
     return OpenSearchGraphVectorStore(
         opensearch_url=DEFAULT_OPENSEARCH_URL,
         index_name=index_name,
-        embedding=embedding_d2,
+        embedding_function=embedding_d2,
         reset_index=True,
     )
 
