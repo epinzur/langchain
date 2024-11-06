@@ -68,7 +68,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         self.cassandra_vector_store = cast(CassandraGraphInterface, vector_store)
 
     @abstractmethod
-    def get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
+    def _get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
         """Prepares the links in a document by serializing them to metadata.
 
         Args:
@@ -79,7 +79,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         """
 
     @abstractmethod
-    def restore_links(self, doc: Document) -> Document:
+    def _restore_links(self, doc: Document) -> Document:
         """Restores links in a document by deserializing them from metadata.
 
         Args:
@@ -90,7 +90,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         """
 
     @abstractmethod
-    def get_metadata_filter(
+    def _get_metadata_filter(
         self,
         metadata: dict[str, Any] | None = None,
         outgoing_link: Link | None = None,
@@ -115,7 +115,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
             The documents ready for use in the graph vector store
         """
         for doc in docs:
-            yield self.restore_links(doc=doc)
+            yield self._restore_links(doc=doc)
 
     def prep_docs_for_insertion(self, docs: Iterable[Document]) -> Iterable[Document]:
         """Prepares the links in documents by serializing them to metadata.
@@ -129,7 +129,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         for doc in docs:
             if doc.id is None:
                 doc.id = secrets.token_hex(8)
-            doc.metadata = self.get_metadata_for_insertion(doc=doc)
+            doc.metadata = self._get_metadata_for_insertion(doc=doc)
             yield doc
 
     @override
@@ -316,7 +316,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
             The the document if it exists. Otherwise None.
         """
         doc = self.cassandra_vector_store.get_by_document_id(document_id=document_id)
-        return self.restore_links(doc=doc) if doc is not None else None
+        return self._restore_links(doc=doc) if doc is not None else None
 
     async def aget_by_document_id(self, document_id: str) -> Document | None:
         """Retrieve a single document node from the store, given its id.
@@ -330,7 +330,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         doc = await self.cassandra_vector_store.aget_by_document_id(
             document_id=document_id
         )
-        return self.restore_links(doc=doc) if doc is not None else None
+        return self._restore_links(doc=doc) if doc is not None else None
 
     def _return_docs_with_embeddings(
         self, rows: list[tuple[Document, list[float]]]
@@ -338,7 +338,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
         docs: list[Document] = []
         for doc, embedding in rows:
             _set_embedding(doc=doc, embedding=embedding)
-            docs.append(self.restore_links(doc=doc))
+            docs.append(self._restore_links(doc=doc))
         return docs
 
     def similarity_search_with_embedding(
@@ -843,7 +843,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
             docs = self.similarity_search_with_embedding_by_vector(
                 embedding=query_embedding,
                 k=k_per_link or 10,
-                filter=self.get_metadata_filter(metadata=filter, outgoing_link=link),
+                filter=self._get_metadata_filter(metadata=filter, outgoing_link=link),
             )
             doc_cache.add_documents(docs)
             targets.update({doc.id: doc for doc in docs if doc.id is not None})
@@ -878,7 +878,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
             self.asimilarity_search_with_embedding_by_vector(
                 embedding=query_embedding,
                 k=k_per_link or 10,
-                filter=self.get_metadata_filter(metadata=filter, outgoing_link=link),
+                filter=self._get_metadata_filter(metadata=filter, outgoing_link=link),
             )
             for link in links
         ]
@@ -951,7 +951,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
 
             if _outgoing_links:
                 for outgoing_link in _outgoing_links:
-                    metadata_filter = self.get_metadata_filter(
+                    metadata_filter = self._get_metadata_filter(
                         metadata=filter,
                         outgoing_link=outgoing_link,
                     )
@@ -1042,7 +1042,7 @@ class CassandraGraphVectorStoreBase(GraphVectorStore):
                 metadata_search_tasks = [
                     asyncio.create_task(
                         self.ametadata_search(
-                            filter=self.get_metadata_filter(
+                            filter=self._get_metadata_filter(
                                 metadata=filter, outgoing_link=outgoing_link
                             ),
                             n=1000,
