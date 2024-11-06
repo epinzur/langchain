@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 import warnings
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
 from langchain_core.documents import Document
@@ -16,15 +16,18 @@ IMPORT_OPENSEARCH_PY_ERROR = (
     "Could not import OpenSearch. Please install it with `pip install opensearch-py`."
 )
 IMPORT_ASYNC_OPENSEARCH_PY_ERROR = """
-Could not import AsyncOpenSearch. 
+Could not import AsyncOpenSearch.
 Please install it with `pip install opensearch-py`."""
 
 SCRIPT_SCORING_SEARCH = "script_scoring"
 PAINLESS_SCRIPTING_SEARCH = "painless_scripting"
 MATCH_ALL_QUERY = {"match_all": {}}  # type: Dict
 
+if TYPE_CHECKING:
+    from opensearchpy import AsyncOpenSearch, OpenSearch
 
-def _import_opensearch() -> Any:
+
+def _import_opensearch() -> OpenSearch:
     """Import OpenSearch if available, otherwise raise error."""
     try:
         from opensearchpy import OpenSearch

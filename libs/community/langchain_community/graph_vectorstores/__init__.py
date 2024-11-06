@@ -141,10 +141,10 @@ from langchain_community.graph_vectorstores.base import (
     Node,
 )
 from langchain_community.graph_vectorstores.cassandra import CassandraGraphVectorStore
-from langchain_community.graph_vectorstores.links import (
-    Link,
-)
+from langchain_community.graph_vectorstores.links import Link, add_links, get_links
 from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
+from langchain_community.graph_vectorstores.opensearch import OpenSearchGraphVectorStore
+
 
 __all__ = [
     "GraphVectorStore",
@@ -153,4 +153,7 @@ __all__ = [
     "Link",
     "CassandraGraphVectorStore",
     "MmrHelper",
+    "OpenSearchGraphVectorStore",
+    "add_links",
+    "get_links",
 ]
