@@ -178,8 +178,7 @@ class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
         # only in the searchable `metadata_s` column?
         for incoming_link in incoming_links(links=links):
             incoming_link_key = _metadata_link_key(link=incoming_link)
-            if incoming_link_key in doc.metadata:
-                del doc.metadata[incoming_link_key]
+            doc.metadata.pop(incoming_link_key, None)
         return doc
 
     def get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
@@ -391,7 +390,10 @@ class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
             metadata_deny_list=metadata_deny_list,
             **kwargs,
         )
-        store.add_documents(documents=documents, ids=ids)
+        if ids is None:
+            store.add_documents(documents)
+        else:
+            store.add_documents(documents, ids=ids)
         return store
 
     @classmethod
@@ -448,5 +450,8 @@ class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
             metadata_deny_list=metadata_deny_list,
             **kwargs,
         )
-        await store.aadd_documents(documents=documents, ids=ids)
+        if ids is None:
+            await store.aadd_documents(documents)
+        else:
+            await store.aadd_documents(documents, ids=ids)
         return store
