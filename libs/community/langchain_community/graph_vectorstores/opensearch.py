@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import secrets
 from dataclasses import asdict, is_dataclass
 from typing import (
     TYPE_CHECKING,
@@ -19,13 +21,27 @@ from typing import (
     cast,
 )
 
-from langchain_community.vectorstores import OpenSearchVectorSearch
-from langchain_core._api import beta
+from langchain_core._api import beta, deprecated
 from langchain_core.documents import Document
 from typing_extensions import override
 
-from langchain_community.graph_vectorstores.base import GraphVectorStore, Node
-from langchain_community.graph_vectorstores.links import METADATA_LINKS_KEY, Link
+from langchain_community.graph_vectorstores.base import (
+    NODE_CLASS_DEPRECATED_SINCE,
+    GraphVectorStore,
+    Node,
+)
+from langchain_community.graph_vectorstores.interfaces.cassandra import (
+    CassandraGraphInterface,
+)
+from langchain_community.graph_vectorstores.links import (
+    METADATA_LINKS_KEY,
+    Link,
+    get_links,
+    incoming_links,
+    outgoing_links,
+)
+from langchain_community.graph_vectorstores.document_cache import DocumentCache
+from langchain_community.vectorstores import OpenSearchVectorSearch
 
 OSGVST = TypeVar("OSGVST", bound="OpenSearchGraphVectorStore")
 
@@ -57,11 +73,12 @@ def _deserialize_links(json_blob: str | None) -> set[Link]:
         for link in cast(list[dict[str, Any]], json.loads(json_blob or "[]"))
     }
 
+
 def _doc_to_node(doc: Document) -> Node:
     #### Question for Eric - I already have the document's links deserialized.
     metadata = doc.metadata.copy()
-    #links = metadata.get(METADATA_LINKS_KEY)
-    #metadata[METADATA_LINKS_KEY] = links
+    # links = metadata.get(METADATA_LINKS_KEY)
+    # metadata[METADATA_LINKS_KEY] = links
 
     ### Question for Eric -- is the expecatation that node has the serialized links in the metadata?
     return Node(
@@ -70,8 +87,6 @@ def _doc_to_node(doc: Document) -> Node:
         metadata=metadata,
         links=metadata.get(METADATA_LINKS_KEY),
     )
-
-
 
 
 @beta()
@@ -88,7 +103,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         verify_certs (bool): Whether to verify SSL certificates.
         ssl_show_warn (bool): Whether to show SSL warnings.
         reset_index (bool): Whether to reset the OpenSearch index on initialization.
-        os_vector_store (OpenSearchVectorSearch): The OpenSearch vector store instance.
+        vector_store (OpenSearchVectorSearch): The OpenSearch vector store instance.
 
     Methods:
         embeddings: Returns the embedding function.
@@ -140,58 +155,78 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         """
         self.index_name = index_name
 
-
-        self.os_vector_store = OpenSearchVectorSearch(
+        self.vector_store = OpenSearchVectorSearch(
             embedding_function=embedding_function,
             opensearch_url=opensearch_url,
             index_name=index_name,
             **kwargs,
         )
 
-        if reset_index and self.os_vector_store.index_exists(
-            index_name=index_name
-        ):
-            self.os_vector_store.client.delete_by_query(
-                index=self.index_name, body={"query": {"match_all": {}}}
-            )
+        if reset_index and self.vector_store.index_exists(index_name=index_name):
+            self.vector_store.client.indices.delete(index=index_name)
 
     @property
     @override
     def embeddings(self) -> Embeddings | None:
-        return self.embedding
+        return self.vector_store.embeddings
 
-    @override
-    def add_documents(self, documents: Sequence[Document], **kwargs: Any) -> None:
-        for doc in documents:
-            if METADATA_LINKS_KEY in doc.metadata:
-                doc.metadata[METADATA_LINKS_KEY] = _serialize_links(
-                    doc.metadata[METADATA_LINKS_KEY]
-                )
-        self.os_vector_store.add_documents(documents, ids=[doc.id for doc in documents])
-
-    async def aadd_documents(
-        self, documents: Sequence[Document], **kwargs: Any
-    ) -> None:
-        """Asynchronously add documents to the vector store.
+    def prep_docs_for_insertion(self, docs: Iterable[Document]) -> Iterable[Document]:
+        """Prepares the links in documents by serializing them to metadata.
 
         Args:
-            documents: A sequence of Document objects to add.
-            **kwargs: Additional keyword arguments.
+            docs: Documents to prepare
 
+        Returns:
+            The documents ready for insertion into the database
         """
-        ids = [doc.id for doc in documents]
-        page_contents = [doc.page_content for doc in documents]
-        metadatas = [doc.metadata for doc in documents]
-        self.os_vector_store.aadd_texts(
-            texts=page_contents, ids=ids, metadata=metadatas
-        )
+        for doc in docs:
+            if doc.id is None:
+                doc.id = secrets.token_hex(8)
+            if doc.metadata is not None and METADATA_LINKS_KEY in doc.metadata:
+                metadata = doc.metadata.copy()
+                metadata[METADATA_LINKS_KEY] = _serialize_links(
+                    metadata[METADATA_LINKS_KEY]
+                )
+                doc.metadata = metadata
+            yield doc
 
+    @override
+    def add_documents(
+        self,
+        documents: Iterable[Document],
+        **kwargs: Any,
+    ) -> list[str]:
+        """Add document nodes to the graph vector store.
+
+        Args:
+            documents: the document nodes to add.
+            **kwargs: Additional keyword arguments.
+        """
+        docs = self.prep_docs_for_insertion(docs=documents)
+        return self.vector_store.add_documents(list(docs), **kwargs)
+
+    @override
+    async def aadd_documents(
+        self,
+        documents: Iterable[Document],
+        **kwargs: Any,
+    ) -> list[str]:
+        """Add document nodes to the graph vector store.
+
+        Args:
+            documents: the document nodes to add.
+            **kwargs: Additional keyword arguments.
+        """
+        docs = self.prep_docs_for_insertion(docs=documents)
+        return [
+            id for id in await self.vector_store.aadd_documents(list(docs), **kwargs)
+        ]
 
     # region Basic Search Methods
 
     @override
     def similarity_search(
-        self, query_text: str, k: int = 4, **kwargs: Any
+        self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Document]:
         """Perform a similarity search on the OpenSearch vector store.
 
@@ -206,18 +241,17 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         """
         search_type = kwargs.get("search_type", "knn")
         vector_field = kwargs.get("vector_field", "vector_field")
-        index_name = kwargs.get("index_name", self.index_name)
         text_field = kwargs.get("text_field", "text")
         metadata_field = kwargs.get("metadata_field", "metadata")
-        query_embedding = self.embedding.embed_query(query_text)
+        query_embedding = self.embeddings.embed_query(query)
         query = {
             "size": k,
             "query": {search_type: {vector_field: {"vector": query_embedding, "k": k}}},
         }
 
         # Execute the synchronous search
-        response = self.os_vector_store.client.search(
-            index=self.index_name,  body=query, size=k
+        response = self.vector_store.client.search(
+            index=self.index_name, body=query, size=k
         )
         hits = response["hits"]["hits"]
 
@@ -236,7 +270,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
     @override
     async def asimilarity_search(
         self,
-        query_text: str,
+        query: str,
         k: int = 4,
         filter: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -259,7 +293,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         text_field = kwargs.get("text_field", "text")
         metadata_field = kwargs.get("metadata_field", "metadata")
 
-        query_embedding = self.embedding.embed_query(query_text)
+        query_embedding = self.embeddings.embed_query(query)
 
         # Define the search query
         query = {
@@ -268,7 +302,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         }
 
         # Perform the asynchronous search
-        response = await self.os_vector_store.async_client.search(
+        response = await self.vector_store.async_client.search(
             index=index_name, body=query
         )
 
@@ -282,13 +316,6 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
                     metadata=hit["_source"][metadata_field],
                 )
             )
-
-    def get_documents(self, k: int = 10) -> List[Document]:
-        """Retrieve and process k documents from OpenSearch."""
-        return [
-            self._restore_links(doc)
-            for doc in self.os_vector_store.similarity_search(query="*", k=k)
-        ]
 
     def from_texts(self, texts: List[str]) -> None:
         """Create nodes from texts and add them to the vector store."""
@@ -311,7 +338,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         doc.metadata[METADATA_LINKS_KEY] = links
         return doc
 
-    def search_by_id(self, document_id: str, **kwargs: Any) -> Document | None:
+    def get_by_document_id(self, document_id: str, **kwargs: Any) -> Document | None:
         """Retrieve a single document from the store, given its document ID.
 
             document_id (str): The document ID.
@@ -328,7 +355,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         try:
             text_field = kwargs.get("text_field", "text")
             metadata_field = kwargs.get("metadata_field", "metadata")
-            response = self.os_vector_store.client.get(
+            response = self.vector_store.client.get(
                 index=self.index_name, id=document_id
             )
             hit = response["_source"]
@@ -348,7 +375,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         except Exception as e:
             logger.error("Error retrieving document: %s", e)
 
-    async def asearch_by_id(self, document_id: str, **kwargs: Any) -> Document | None:
+    async def aget_by_document_id(self, document_id: str, **kwargs: Any) -> Document | None:
         """Retrieve a single document from the store, given its document ID.
 
         Args:
@@ -361,7 +388,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         try:
             text_field = kwargs.get("text_field", "text")
             metadata_field = kwargs.get("metadata_field", "metadata")
-            response = await self.os_vector_store.async_client.get(
+            response = await self.vector_store.async_client.get(
                 index=self.index_name, id=document_id
             )
             hit = response["_source"]
@@ -411,7 +438,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         }
 
         # Execute the synchronous search
-        response = self.os_vector_store.client.search(
+        response = self.vector_store.client.search(
             index=self.index_name, body={"query": query}, size=k
         )
         hits = response["hits"]["hits"]
@@ -448,7 +475,7 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
             query = {"match_all": {}}
 
         # Execute the search, Notice that we are using the async client
-        response = await self.os_vector_store.async_client.search(
+        response = await self.vector_store.async_client.search(
             index=self.index_name, body={"query": query}, size=k
         )
         hits = response["hits"]["hits"]
@@ -462,15 +489,18 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
                 )
             )
 
-
-    def similarity_search_by_vector_and_metadata(self, query_text, metadata: Dict[str, Any] | None = None, k: int = 10, **kwargs: Any) -> Iterable[Document]:
-
+    def similarity_search_by_vector_and_metadata(
+        self,
+        query: str,
+        metadata: Dict[str, Any] | None = None,
+        k: int = 10,
+        **kwargs: Any,
+    ) -> Iterable[Document]:
         search_type = kwargs.get("search_type", "knn")
         vector_field = kwargs.get("vector_field", "vector_field")
-        index_name = kwargs.get("index_name", self.index_name)
         text_field = kwargs.get("text_field", "text")
         metadata_field = kwargs.get("metadata_field", "metadata")
-        query_vector = self.embedding.embed_query(query_text)
+        query_vector = self.embeddings.embed_query(query)
 
         query = {
             "size": k,
@@ -486,11 +516,13 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
                     "must": [
                         # Vector similarity using script_score
                         {
-                           search_type: {vector_field: {"vector": query_vector, "k": k}},
+                            search_type: {
+                                vector_field: {"vector": query_vector, "k": k}
+                            },
                         }
-                    ]
+                    ],
                 }
-            }
+            },
         }
 
         # query = {
@@ -523,8 +555,8 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         # }
 
         # Execute the synchronous search
-        response = self.os_vector_store.client.search(
-            index=self.index_name,  body=query, size=k
+        response = self.vector_store.client.search(
+            index=self.index_name, body=query, size=k
         )
         hits = response["hits"]["hits"]
 
@@ -540,11 +572,8 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
             for hit in hits
         ]
 
-    # endregion
-
-    # region Traversal Search Methods
     @override
-    def traversal_search(
+    def traversal_search(  # noqa: C901
         self,
         query: str,
         *,
@@ -553,6 +582,33 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Iterable[Document]:
+        """Retrieve documents from this knowledge store.
+
+        First, `k` nodes are retrieved using a vector search for the `query` string.
+        Then, additional nodes are discovered up to the given `depth` from those
+        starting nodes.
+
+        Args:
+            query: The query string.
+            k: The number of Documents to return from the initial vector search.
+                Defaults to 4.
+            depth: The maximum depth of edges to traverse. Defaults to 1.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Collection of retrieved documents.
+        """
+        # Depth 0:
+        #   Query for `k` document nodes similar to the question.
+        #   Retrieve `content_id` and `outgoing_links()`.
+        #
+        # Depth 1:
+        #   Query for document nodes that have an incoming link in `outgoing_links()`.
+        #   Combine node IDs.
+        #   Query for `outgoing_links()` of those "new" node IDs.
+        #
+        # ...
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}
@@ -560,100 +616,148 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         # Map from visited link to depth
         visited_links: dict[Link, int] = {}
 
-        # Map from id to Document
-        retrieved_docs: dict[str, Document] = {}
+        doc_cache = DocumentCache()
 
-        def visit_nodes(d: int, docs: Iterable[Document]) -> None:
-            """Recursively visit nodes and their outgoing links."""
-            nonlocal visited_ids, visited_links, retrieved_docs
+        def visit_nodes(d: int, nodes: Iterable[Document]) -> None:
+            """Recursively visit document nodes and their outgoing links."""
+            _outgoing_links = self._gather_outgoing_links(
+                nodes=nodes,
+                visited_ids=visited_ids,
+                visited_links=visited_links,
+                d=d,
+                depth=depth,
+            )
 
-            # Iterate over nodes, tracking the *new* outgoing links for this
-            # depth. These are links that are either new, or newly discovered at a
-            # lower depth.
-            outgoing_links: set[Link] = set()
-            for doc in docs:
-                print(doc)
-                if doc.id is not None:
-                    if doc.id not in retrieved_docs:
-                        retrieved_docs[doc.id] = doc
-
-                    # If this node is at a closer depth, update visited_ids
-                    if d <= visited_ids.get(doc.id, depth):
-                        visited_ids[doc.id] = d
-
-                        # If we can continue traversing from this node,
-                        if d < depth:
-                            node = _doc_to_node(doc=doc)
-                            # Record any new (or newly discovered at a lower depth)
-                            # links to the set to traverse.
-                            for link in _outgoing_links(node=node):
-                                if d <= visited_links.get(link, depth):
-                                    # Record that we'll query this link at the
-                                    # given depth, so we don't fetch it again
-                                    # (unless we find it an earlier depth)
-                                    visited_links[link] = d
-                                    outgoing_links.add(link)
-
-            if outgoing_links:
-                for outgoing_link in outgoing_links:
+            if _outgoing_links:
+                for outgoing_link in _outgoing_links:
                     metadata_filter = self._get_metadata_filter(
                         metadata=filter,
                         outgoing_link=outgoing_link,
                     )
 
-                    docs = self.vector_store.metadata_search(
-                        filter=metadata_filter, n=1000
-                    )
+                    docs = list(self.metadata_search(filter=metadata_filter, n=1000))
+                    doc_cache.add_documents(docs)
 
-                    visit_targets(d=d + 1, docs=docs)
+                    new_ids_at_next_depth: set[str] = set()
+                    for doc in docs:
+                        if doc.id is not None:
+                            if d < visited_ids.get(doc.id, depth):
+                                new_ids_at_next_depth.add(doc.id)
 
-        def visit_targets(d: int, docs: Iterable[Document]) -> None:
-            """Visit target nodes retrieved from outgoing links."""
-            nonlocal visited_ids, retrieved_docs
-
-            new_ids_at_next_depth = set()
-            for doc in docs:
-                if doc.id is not None:
-                    if doc.id not in retrieved_docs:
-                        retrieved_docs[doc.id] = doc
-
-                    if d <= visited_ids.get(doc.id, depth):
-                        new_ids_at_next_depth.add(doc.id)
-
-            if new_ids_at_next_depth:
-                for doc_id in new_ids_at_next_depth:
-                    if doc_id in retrieved_docs:
-                        visit_nodes(d=d, docs=[retrieved_docs[doc_id]])
-                    else:
-                        new_doc = self.vector_store.get_by_document_id(
-                            document_id=doc_id
+                    if new_ids_at_next_depth:
+                        nodes = doc_cache.get_by_document_ids(
+                            doc_ids=new_ids_at_next_depth
                         )
-                        if new_doc is not None:
-                            visit_nodes(d=d, docs=[new_doc])
+                        visit_nodes(d=d + 1, nodes=nodes)
 
         # Start the traversal
-        initial_docs = self.similarity_search(
-            query_text=query,
-            k=k
+        initial_nodes = self.similarity_search(
+            query=query,
+            k=k,
+            filter=filter,
         )
+        doc_cache.add_documents(docs=initial_nodes)
+        visit_nodes(d=0, nodes=initial_nodes)
 
-        visit_nodes(d=0, docs=initial_docs)
+        return doc_cache.get_by_document_ids(doc_ids=visited_ids)
 
-        result_docs = []
-        for doc_id in visited_ids:
+    @override
+    async def atraversal_search(  # noqa: C901
+        self,
+        query: str,
+        *,
+        k: int = 4,
+        depth: int = 1,
+        filter: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterable[Document]:
+        """Retrieve documents from this knowledge store.
 
-            if doc_id in retrieved_docs:
-                #result_docs.append(self._restore_links(retrieved_docs[doc_id]))
-                result_docs.append(retrieved_docs[doc_id])
-            else:
-                msg = f"retrieved_docs should contain id: {doc_id}"
-                raise RuntimeError(msg)
-        return result_docs
+        First, `k` nodes are retrieved using a vector search for the `query` string.
+        Then, additional nodes are discovered up to the given `depth` from those
+        starting nodes.
 
+        Args:
+            query: The query string.
+            k: The number of Documents to return from the initial vector search.
+                Defaults to 4.
+            depth: The maximum depth of edges to traverse. Defaults to 1.
+            filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
 
-    # endregion
+        Returns:
+            Collection of retrieved documents.
+        """
+        # Depth 0:
+        #   Query for `k` document nodes similar to the question.
+        #   Retrieve `content_id` and `outgoing_links()`.
+        #
+        # Depth 1:
+        #   Query for document nodes that have an incoming link in`outgoing_links()`.
+        #   Combine node IDs.
+        #   Query for `outgoing_links()` of those "new" node IDs.
+        #
+        # ...
 
-    # region Other Methods
+        # Map from visited ID to depth
+        visited_ids: dict[str, int] = {}
+
+        # Map from visited link to depth
+        visited_links: dict[Link, int] = {}
+
+        doc_cache = DocumentCache()
+
+        async def visit_nodes(d: int, nodes: Iterable[Document]) -> None:
+            """Recursively visit document nodes and their outgoing links."""
+            _outgoing_links = self._gather_outgoing_links(
+                nodes=nodes,
+                visited_ids=visited_ids,
+                visited_links=visited_links,
+                d=d,
+                depth=depth,
+            )
+
+            if _outgoing_links:
+                metadata_search_tasks = [
+                    asyncio.create_task(
+                        self.ametadata_search(
+                            filter=self._get_metadata_filter(
+                                metadata=filter, outgoing_link=outgoing_link
+                            ),
+                            n=1000,
+                        )
+                    )
+                    for outgoing_link in _outgoing_links
+                ]
+
+                for search_task in asyncio.as_completed(metadata_search_tasks):
+                    docs = await search_task
+                    docs = list(docs)
+                    doc_cache.add_documents(docs)
+
+                    new_ids_at_next_depth: set[str] = set()
+                    for doc in docs:
+                        if doc.id is not None:
+                            if d < visited_ids.get(doc.id, depth):
+                                new_ids_at_next_depth.add(doc.id)
+
+                    if new_ids_at_next_depth:
+                        nodes = doc_cache.get_by_document_ids(
+                            doc_ids=new_ids_at_next_depth
+                        )
+                        await visit_nodes(d=d + 1, nodes=nodes)
+
+        # Start the traversal
+        initial_nodes = await self.asimilarity_search(
+            query=query,
+            k=k,
+            filter=filter,
+        )
+        doc_cache.add_documents(docs=initial_nodes)
+        await visit_nodes(d=0, nodes=initial_nodes)
+
+        for doc in doc_cache.get_by_document_ids(doc_ids=visited_ids):
+            yield doc
 
     def similarity_search_with_score(
         self, query: str, k: int = 4, **kwargs: Any
@@ -747,3 +851,34 @@ class OpenSearchGraphVectorStore(GraphVectorStore):
         pass
 
     # endregion
+
+    def _gather_outgoing_links(
+        self,
+        nodes: Iterable[Document],
+        visited_ids: dict[str, int],
+        visited_links: dict[Link, int],
+        d: int,
+        depth: int,
+    ) -> set[Link]:
+        # Iterate over document nodes, tracking the *new* outgoing links for this
+        # depth. These are links that are either new, or newly discovered at a
+        # lower depth.
+        _outgoing_links: set[Link] = set()
+        for node in nodes:
+            if node.id is not None:
+                # If this document node is at a closer depth, update visited_ids
+                if d <= visited_ids.get(node.id, depth):
+                    visited_ids[node.id] = d
+
+                    # If we can continue traversing from this document node,
+                    if d < depth:
+                        # Record any new (or newly discovered at a lower depth)
+                        # links to the set to traverse.
+                        for link in outgoing_links(links=get_links(doc=node)):
+                            if d <= visited_links.get(link, depth):
+                                # Record that we'll query this link at the
+                                # given depth, so we don't fetch it again
+                                # (unless we find it an earlier depth)
+                                visited_links[link] = d
+                                _outgoing_links.add(link)
+        return _outgoing_links

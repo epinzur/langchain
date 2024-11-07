@@ -8,10 +8,14 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from langchain_community.graph_vectorstores import OpenSearchGraphVectorStore, Link, add_links, get_links
+from langchain_community.graph_vectorstores import (
+    Link,
+    OpenSearchGraphVectorStore,
+    add_links,
+    get_links,
+)
 from langchain_community.graph_vectorstores.base import METADATA_LINKS_KEY, Node
 from langchain_community.graph_vectorstores.cassandra_base import METADATA_EMBEDDING_KEY
-
 from tests.integration_tests.cache.fake_embeddings import (
     AngularTwoDimensionalEmbeddings,
     FakeEmbeddings,
@@ -145,6 +149,7 @@ def graph_vector_store_angular(
         reset_index=True,
     )
 
+
 @pytest.fixture(scope="function")
 def graph_vector_store_earth(
     index_name: str = "graph_test_index",
@@ -180,6 +185,7 @@ def graph_vector_store_d2(
         embedding_function=embedding_d2,
         reset_index=True,
     )
+
 
 @pytest.fixture(scope="function")
 def populated_graph_vector_store_d2(
@@ -568,7 +574,7 @@ class TestOpenSearchGraphVectorStore:
         assert hits[0].page_content == "[1, 2]"
         assert hits[0].id == "x_id"
         # there may be more re:graph structure.
-        assert hits[0].metadata["md"] == "1.0"
+        assert hits[0].metadata["md"] == 1
         assert_document_format(hits[0])
 
     def test_gvs_from_documents_containing_ids(
@@ -587,7 +593,7 @@ class TestOpenSearchGraphVectorStore:
         assert hits[0].page_content == "[1, 2]"
         assert hits[0].id == "x_id"
         # there may be more re:graph structure.
-        assert hits[0].metadata["md"] == "1.0"
+        assert hits[0].metadata["md"] == 1
         assert_document_format(hits[0])
 
     def test_gvs_add_nodes_sync(
@@ -616,14 +622,14 @@ class TestOpenSearchGraphVectorStore:
         assert hits[0].id == "id0"
         assert hits[0].page_content == "[1, 0]"
         md0 = hits[0].metadata
-        assert md0["m"] == "0.0"
+        assert md0["m"] == 0
         assert any(isinstance(v, set) for k, v in md0.items() if k != "m")
         assert_document_format(hits[0])
 
         assert hits[1].id != "id0"
         assert hits[1].page_content == "[-1, 0]"
         md1 = hits[1].metadata
-        assert md1["m"] == "1.0"
+        assert md1["m"] == 1
         assert any(isinstance(v, set) for k, v in md1.items() if k != "m")
         assert_document_format(hits[1])
 
@@ -665,3 +671,4 @@ class TestOpenSearchGraphVectorStore:
         assert md1["m"] == "1.0"
         assert any(isinstance(v, set) for k, v in md1.items() if k != "m")
         assert_document_format(hits[1])
+

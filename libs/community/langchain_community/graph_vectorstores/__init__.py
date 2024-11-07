@@ -145,7 +145,6 @@ from langchain_community.graph_vectorstores.links import Link, add_links, get_li
 from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
 from langchain_community.graph_vectorstores.opensearch import OpenSearchGraphVectorStore
 
-
 __all__ = [
     "GraphVectorStore",
     "GraphVectorStoreRetriever",
