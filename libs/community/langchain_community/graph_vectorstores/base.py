@@ -148,7 +148,7 @@ def _nodes_to_documents(
         yield doc
 
 
-@beta(message="Added in version 0.3.1 of langchain_community. API subject to change.")
+# @beta(message="Added in version 0.3.1 of langchain_community. API subject to change.")
 class GraphVectorStore(VectorStore):
     """A hybrid vector-and-graph graph store.
 

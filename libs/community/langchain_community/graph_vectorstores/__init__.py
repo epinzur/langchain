@@ -141,6 +141,7 @@ from langchain_community.graph_vectorstores.base import (
     Node,
 )
 from langchain_community.graph_vectorstores.cassandra import CassandraGraphVectorStore
+from langchain_community.graph_vectorstores.chroma import ChromaGraphVectorStore
 from langchain_community.graph_vectorstores.links import (
     Link,
 )
@@ -152,5 +153,6 @@ __all__ = [
     "Node",
     "Link",
     "CassandraGraphVectorStore",
+    "ChromaGraphVectorStore",
     "MmrHelper",
 ]
