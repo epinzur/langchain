@@ -15,27 +15,24 @@ from typing import (
     Optional,
     Type,
     TypeVar,
-    Sequence,
     cast,
 )
 
-from langchain_core._api import beta, deprecated
 from langchain_core.documents import Document
 
 from langchain_community.graph_vectorstores.base import (
-    NODE_CLASS_DEPRECATED_SINCE,
-    Node,
     _texts_to_documents,
 )
-from langchain_community.graph_vectorstores.wrappers import ChromaVectorStoreForGraph
-from langchain_community.graph_vectorstores.base import GraphVectorStore
-from langchain_community.graph_vectorstores.cassandra_base import CassandraGraphVectorStoreBase
+from langchain_community.graph_vectorstores.cassandra_base import (
+    CassandraGraphVectorStoreBase,
+)
 from langchain_community.graph_vectorstores.links import (
     METADATA_LINKS_KEY,
     Link,
     get_links,
     incoming_links,
 )
+from langchain_community.graph_vectorstores.wrappers import ChromaVectorStoreForGraph
 
 ChromaGVS = TypeVar("ChromaGVS", bound="ChromaGraphVectorStore")
 
@@ -44,10 +41,10 @@ if TYPE_CHECKING:
     from langchain_core.embeddings import Embeddings
 
 
-
 logger = logging.getLogger(__name__)
 
 METADATA_INCOMING_LINKS_KEY = "__incoming_links"
+
 
 def _serialize_links(links: list[Link]) -> str:
     class SetAndLinkEncoder(json.JSONEncoder):
@@ -78,8 +75,8 @@ def _metadata_link_key(link: Link) -> str:
 def _metadata_link_value() -> str:
     return "link"
 
-class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
 
+class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
     _LANGCHAIN_DEFAULT_COLLECTION_NAME = "langchain"
 
     def __init__(
@@ -274,11 +271,11 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
     def from_texts(
         cls: Type[ChromaGVS],
         texts: List[str],
+        embedding: Embeddings,
         metadatas: Optional[List[dict]] = None,
-        ids: Optional[List[str]] = None,
         *,
+        ids: Optional[List[str]] = None,
         collection_name: str = _LANGCHAIN_DEFAULT_COLLECTION_NAME,
-        embedding_function: Optional[Embeddings] = None,
         persist_directory: Optional[str] = None,
         client_settings: Optional[chromadb.config.Settings] = None,
         collection_metadata: Optional[Dict] = None,
@@ -291,10 +288,10 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
 
         Args:
             texts: Texts to add to the graph vectorstore.
+            embedding: Embedding function to use.
             metadatas: Optional list of metadatas associated with the texts.
             ids: Optional list of IDs associated with the texts.
             collection_name: Name of the collection to create.
-            embedding_function: Embedding class object. Used to embed texts.
             persist_directory: Directory to persist the collection.
             client_settings: Chroma client settings
             collection_metadata: Collection configurations.
@@ -311,7 +308,7 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
         """
         store = cls(
             collection_name=collection_name,
-            embedding_function=embedding_function,
+            embedding_function=embedding,
             persist_directory=persist_directory,
             client_settings=client_settings,
             collection_metadata=collection_metadata,
@@ -331,11 +328,11 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
     async def afrom_texts(
         cls: Type[ChromaGVS],
         texts: List[str],
+        embedding: Embeddings,
         metadatas: Optional[List[dict]] = None,
-        ids: Optional[List[str]] = None,
         *,
+        ids: Optional[List[str]] = None,
         collection_name: str = _LANGCHAIN_DEFAULT_COLLECTION_NAME,
-        embedding_function: Optional[Embeddings] = None,
         persist_directory: Optional[str] = None,
         client_settings: Optional[chromadb.config.Settings] = None,
         collection_metadata: Optional[Dict] = None,
@@ -348,10 +345,10 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
 
         Args:
             texts: Texts to add to the graph vectorstore.
+            embedding: Embedding function to use.
             metadatas: Optional list of metadatas associated with the texts.
             ids: Optional list of IDs associated with the texts.
             collection_name: Name of the collection to create.
-            embedding_function: Embedding class object. Used to embed texts.
             persist_directory: Directory to persist the collection.
             client_settings: Chroma client settings
             collection_metadata: Collection configurations.
@@ -368,7 +365,7 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
         """
         store = cls(
             collection_name=collection_name,
-            embedding_function=embedding_function,
+            embedding_function=embedding,
             persist_directory=persist_directory,
             client_settings=client_settings,
             collection_metadata=collection_metadata,
@@ -388,10 +385,10 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
     def from_documents(
         cls: Type[ChromaGVS],
         documents: List[Document],
-        ids: Optional[List[str]] = None,
+        embedding: Embeddings,
         *,
+        ids: Optional[List[str]] = None,
         collection_name: str = _LANGCHAIN_DEFAULT_COLLECTION_NAME,
-        embedding_function: Optional[Embeddings] = None,
         persist_directory: Optional[str] = None,
         client_settings: Optional[chromadb.config.Settings] = None,
         collection_metadata: Optional[Dict] = None,
@@ -404,9 +401,9 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
 
         Args:
             documents: Documents to add to the graph vectorstore.
+            embedding: Embedding function to use.
             ids: Optional list of IDs associated with the documents.
             collection_name: Name of the collection to create.
-            embedding_function: Embedding class object. Used to embed texts.
             persist_directory: Directory to persist the collection.
             client_settings: Chroma client settings
             collection_metadata: Collection configurations.
@@ -423,7 +420,7 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
         """
         store = cls(
             collection_name=collection_name,
-            embedding_function=embedding_function,
+            embedding_function=embedding,
             persist_directory=persist_directory,
             client_settings=client_settings,
             collection_metadata=collection_metadata,
@@ -442,10 +439,10 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
     async def afrom_documents(
         cls: Type[ChromaGVS],
         documents: List[Document],
-        ids: Optional[List[str]] = None,
+        embedding: Embeddings,
         *,
+        ids: Optional[List[str]] = None,
         collection_name: str = _LANGCHAIN_DEFAULT_COLLECTION_NAME,
-        embedding_function: Optional[Embeddings] = None,
         persist_directory: Optional[str] = None,
         client_settings: Optional[chromadb.config.Settings] = None,
         collection_metadata: Optional[Dict] = None,
@@ -458,9 +455,9 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
 
         Args:
             documents: Documents to add to the graph vectorstore.
+            embedding: Embedding function to use.
             ids: Optional list of IDs associated with the documents.
             collection_name: Name of the collection to create.
-            embedding_function: Embedding class object. Used to embed texts.
             persist_directory: Directory to persist the collection.
             client_settings: Chroma client settings
             collection_metadata: Collection configurations.
@@ -477,7 +474,7 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
         """
         store = cls(
             collection_name=collection_name,
-            embedding_function=embedding_function,
+            embedding_function=embedding,
             persist_directory=persist_directory,
             client_settings=client_settings,
             collection_metadata=collection_metadata,

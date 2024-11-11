@@ -1,19 +1,28 @@
-from langchain_core._api import beta, deprecated
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+)
+
+import chromadb
+from chromadb.api.types import IncludeEnum
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import run_in_executor
 
 from langchain_community.graph_vectorstores.interfaces import CassandraGraphInterface
 
-
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
-
-from langchain_chroma import Chroma
-import chromadb
-
 if TYPE_CHECKING:
-    from langchain_chroma import Chroma
     import chromadb
+    from chromadb.api.types import IncludeEnum
+    from langchain_chroma import Chroma
+
 
 class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
     _LANGCHAIN_DEFAULT_COLLECTION_NAME = "langchain"
@@ -45,7 +54,8 @@ class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
                     if it doesn't exist. Defaults to True.
         """
         try:
-            from langchain_chroma import Chroma
+            from langchain_chroma import Chroma  # noqa: F401
+
         except (ImportError, ModuleNotFoundError):
             raise ImportError(
                 "Could not import langchain_chroma python package. "
@@ -62,6 +72,12 @@ class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
             relevance_score_fn=relevance_score_fn,
             create_collection_if_not_exists=create_collection_if_not_exists,
         )
+
+    def _get_safe_embedding(self) -> Embeddings:
+        if not self.embeddings:
+            msg = "Missing embedding"
+            raise ValueError(msg)
+        return self.embeddings
 
     def similarity_search_with_embedding(
         self,
@@ -84,29 +100,34 @@ class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
             (The embedded query vector, The list of (Document, embedding),
             the most similar to the query vector.).
         """
-        embedding = self.embeddings.embed_query(text=query)
+        embedding = self._get_safe_embedding().embed_query(text=query)
         results = self._collection.query(
             query_embeddings=embedding,  # type: ignore
             n_results=k,
             where=filter,  # type: ignore
-            include=["metadatas", "documents", "embeddings"],
+            include=[
+                IncludeEnum.documents,
+                IncludeEnum.metadatas,
+                IncludeEnum.embeddings,
+            ],
             **kwargs,
         )
 
         docs_with_embeddings: List[Tuple[Document, List[float]]] = [
             (
-                Document(page_content=result[0], metadata=result[1] or {}, id=result[2]),
-                result[3]
+                Document(
+                    page_content=result[0], metadata=result[1] or {}, id=result[2]
+                ),
+                result[3],
             )
             for result in zip(
-                results["documents"][0],
-                results["metadatas"][0],
-                results["ids"][0],
-                results["embeddings"][0],
+                results["documents"][0],  # type: ignore
+                results["metadatas"][0],  # type: ignore
+                results["ids"][0],  # type: ignore
+                results["embeddings"][0],  # type: ignore
             )
         ]
         return embedding, docs_with_embeddings
-
 
     async def asimilarity_search_with_embedding(
         self,
@@ -129,7 +150,9 @@ class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
             (The embedded query vector, The list of (Document, embedding),
             the most similar to the query vector.).
         """
-        return await run_in_executor(None, self.similarity_search_with_embedding, query, k, filter, **kwargs)
+        return await run_in_executor(
+            None, self.similarity_search_with_embedding, query, k, filter, **kwargs
+        )
 
     def similarity_search_with_embedding_by_vector(
         self,
@@ -153,19 +176,25 @@ class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
             query_embeddings=embedding,  # type: ignore
             n_results=k,
             where=filter,  # type: ignore
-            include=["metadatas", "documents", "embeddings"],
+            include=[
+                IncludeEnum.documents,
+                IncludeEnum.metadatas,
+                IncludeEnum.embeddings,
+            ],
             **kwargs,
         )
         return [
             (
-                Document(page_content=result[0], metadata=result[1] or {}, id=result[2]),
-                result[3]
+                Document(
+                    page_content=result[0], metadata=result[1] or {}, id=result[2]
+                ),
+                result[3],
             )
             for result in zip(
-                results["documents"][0],
-                results["metadatas"][0],
-                results["ids"][0],
-                results["embeddings"][0],
+                results["documents"][0],  # type: ignore
+                results["metadatas"][0],  # type: ignore
+                results["ids"][0],  # type: ignore
+                results["embeddings"][0],  # type: ignore
             )
         ]
 
@@ -187,7 +216,14 @@ class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
         Returns:
             List of (Document, embedding), the most similar to the query vector.
         """
-        return await run_in_executor(None, self.similarity_search_with_embedding_by_vector, embedding, k, filter, **kwargs)
+        return await run_in_executor(
+            None,
+            self.similarity_search_with_embedding_by_vector,
+            embedding,
+            k,
+            filter,
+            **kwargs,
+        )
 
     def metadata_search(
         self,
@@ -209,7 +245,6 @@ class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
                 results["ids"],
             )
         ]
-
 
     async def ametadata_search(
         self,

@@ -8,7 +8,6 @@ from typing import (
     Optional,
     Protocol,
     Tuple,
-    Union,
 )
 
 from langchain_core.documents import Document
@@ -83,7 +82,6 @@ class CassandraGraphInterface(Protocol):
         embedding: List[float],
         k: int = 4,
         filter: Optional[Dict[str, str]] = None,
-        body_search: Optional[Union[str, List[str]]] = None,
     ) -> List[Tuple[Document, List[float]]]:
         """Return docs most similar to embedding vector.
 

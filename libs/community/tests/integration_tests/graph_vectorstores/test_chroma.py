@@ -1,17 +1,15 @@
 """Test of Chroma DB graph vector store class `ChromaGraphVectorStore`"""
 
 import json
-import os
 import random
-from contextlib import contextmanager
-from typing import Any, Generator, Iterable, List, Optional, cast, TYPE_CHECKING
+from typing import Any, Generator, Iterable, List, Optional, cast
 
 import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
 from langchain_community.graph_vectorstores import ChromaGraphVectorStore
-from langchain_community.graph_vectorstores.base import METADATA_LINKS_KEY, Node
+from langchain_community.graph_vectorstores.base import METADATA_LINKS_KEY
 from langchain_community.graph_vectorstores.cassandra_base import METADATA_EMBEDDING_KEY
 from langchain_community.graph_vectorstores.links import (
     Link,
@@ -148,34 +146,34 @@ class CassandraSession:
         self.table_name = table_name
         self.session = session
 
+
 def cleanup(store: ChromaGraphVectorStore) -> None:
     from langchain_chroma import Chroma
+
     chroma = cast(Chroma, store.vector_store)
     chroma.delete_collection()
 
+
 @pytest.fixture(scope="function")
 def graph_vector_store_angular() -> Generator[ChromaGraphVectorStore, None, None]:
-    store = ChromaGraphVectorStore(
-        embedding_function=AngularTwoDimensionalEmbeddings()
-    )
+    store = ChromaGraphVectorStore(embedding_function=AngularTwoDimensionalEmbeddings())
     yield store
     cleanup(store=store)
+
 
 @pytest.fixture(scope="function")
 def graph_vector_store_earth() -> Generator[ChromaGraphVectorStore, None, None]:
-    store = ChromaGraphVectorStore(
-        embedding_function=EarthEmbeddings()
-    )
+    store = ChromaGraphVectorStore(embedding_function=EarthEmbeddings())
     yield store
     cleanup(store=store)
 
+
 @pytest.fixture(scope="function")
 def graph_vector_store_fake() -> Generator[ChromaGraphVectorStore, None, None]:
-    store = ChromaGraphVectorStore(
-        embedding_function=FakeEmbeddings()
-    )
+    store = ChromaGraphVectorStore(embedding_function=FakeEmbeddings())
     yield store
     cleanup(store=store)
+
 
 @pytest.fixture(scope="function")
 def graph_vector_store_d2(
@@ -186,6 +184,7 @@ def graph_vector_store_d2(
     )
     yield store
     cleanup(store=store)
+
 
 @pytest.fixture(scope="function")
 def populated_graph_vector_store_d2(
@@ -595,4 +594,3 @@ class TestChromaGraphVectorStore:
         # there may be more re:graph structure.
         assert hits[0].metadata["md"] == 1
         assert_document_format(hits[0])
-
