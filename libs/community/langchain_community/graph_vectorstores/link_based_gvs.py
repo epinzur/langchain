@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 import secrets
 from abc import abstractmethod
-from typing import Any, AsyncIterable, AsyncIterator, Iterable, Iterator, Sequence, cast
+from typing import Any, AsyncIterable, AsyncIterator, Iterable, Sequence, cast
 
 from langchain_core.documents import Document
 from langchain_core.vectorstores import VectorStore
 from typing_extensions import override
 
 from langchain_community.graph_vectorstores.base import GraphVectorStore
-from langchain_community.graph_vectorstores.interfaces.cassandra import (
-    CassandraGraphInterface,
+from langchain_community.graph_vectorstores.interfaces import (
+    VectorStoreForGraphInterface,
 )
 from langchain_community.graph_vectorstores.links import Link, get_links, outgoing_links
 from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
@@ -35,37 +35,15 @@ def _clear_embedding(doc: Document) -> None:
     doc.metadata.pop(METADATA_EMBEDDING_KEY, None)
 
 
-class DocumentCache:
-    documents: dict[str, Document] = {}
 
-    def add_document(self, doc: Document) -> None:
-        if doc.id is not None:
-            self.documents[doc.id] = doc
-
-    def add_documents(self, docs: Iterable[Document]) -> None:
-        for doc in docs:
-            self.add_document(doc=doc)
-
-    def get_by_document_ids(
-        self,
-        doc_ids: Iterable[str],
-    ) -> Iterator[Document]:
-        for doc_id in doc_ids:
-            if doc_id in self.documents:
-                yield self.documents[doc_id]
-            else:
-                msg = f"unexpected, cache should contain id: {doc_id}"
-                raise RuntimeError(msg)
-
-
-class CassandraGraphVectorStoreBase(GraphVectorStore):
+class LinkBasedGraphVectorStore(GraphVectorStore):
     vector_store: VectorStore
-    cassandra_vector_store: CassandraGraphInterface
+    vector_store_for_graph: VectorStoreForGraphInterface
 
     def __init__(self, vector_store: VectorStore):
         super().__init__()
         self.vector_store = vector_store
-        self.cassandra_vector_store = cast(CassandraGraphInterface, vector_store)
+        self.vector_store_for_graph = cast(VectorStoreForGraphInterface, vector_store)
 
     @abstractmethod
     def _get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:

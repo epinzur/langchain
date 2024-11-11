@@ -1,7 +1,7 @@
-from langchain_community.graph_vectorstores.interfaces.cassandra import (
-    CassandraGraphInterface,
+from langchain_community.graph_vectorstores.interfaces.vector_store import (
+    VectorStoreForGraphInterface,
 )
 
 __all__ = [
-    "CassandraGraphInterface",
+    "VectorStoreForGraphInterface",
 ]

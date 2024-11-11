@@ -1,9 +1,12 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Literal, Union
+from typing import Any, cast, Literal, Union
 
 from langchain_core._api import beta
 from langchain_core.documents import Document
+
+import json
+from dataclasses import asdict, is_dataclass
 
 METADATA_LINKS_KEY = "links"
 
@@ -156,6 +159,26 @@ class Link:
             tag: the link tag.
         """
         return Link(kind=kind, direction="bidir", tag=tag)
+
+def serialize_links_to_json(links: list[Link]) -> str:
+    class SetAndLinkEncoder(json.JSONEncoder):
+        def default(self, obj: Any) -> Any:  # noqa: ANN401
+            if not isinstance(obj, type) and is_dataclass(obj):
+                return asdict(obj)
+
+            if isinstance(obj, Iterable):
+                return list(obj)
+
+            # Let the base class default method raise the TypeError
+            return super().default(obj)
+
+    return json.dumps(links, cls=SetAndLinkEncoder)
+
+def deserialize_links_from_json(json_blob: str | None) -> set[Link]:
+    return {
+        Link(kind=link["kind"], direction=link["direction"], tag=link["tag"])
+        for link in cast(list[dict[str, Any]], json.loads(json_blob or "[]"))
+    }
 
 
 @beta()

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import asdict, is_dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -23,14 +21,16 @@ from langchain_core.documents import Document
 from langchain_community.graph_vectorstores.base import (
     _texts_to_documents,
 )
-from langchain_community.graph_vectorstores.cassandra_base import (
-    CassandraGraphVectorStoreBase,
+from langchain_community.graph_vectorstores.link_based_gvs import (
+    LinkBasedGraphVectorStore,
 )
 from langchain_community.graph_vectorstores.links import (
+    deserialize_links_from_json,
     METADATA_LINKS_KEY,
     Link,
     get_links,
     incoming_links,
+    serialize_links_to_json,
 )
 from langchain_community.graph_vectorstores.wrappers import ChromaVectorStoreForGraph
 
@@ -45,29 +45,6 @@ logger = logging.getLogger(__name__)
 
 METADATA_INCOMING_LINKS_KEY = "__incoming_links"
 
-
-def _serialize_links(links: list[Link]) -> str:
-    class SetAndLinkEncoder(json.JSONEncoder):
-        def default(self, obj: Any) -> Any:  # noqa: ANN401
-            if not isinstance(obj, type) and is_dataclass(obj):
-                return asdict(obj)
-
-            if isinstance(obj, Iterable):
-                return list(obj)
-
-            # Let the base class default method raise the TypeError
-            return super().default(obj)
-
-    return json.dumps(links, cls=SetAndLinkEncoder)
-
-
-def _deserialize_links(json_blob: str | None) -> set[Link]:
-    return {
-        Link(kind=link["kind"], direction=link["direction"], tag=link["tag"])
-        for link in cast(list[dict[str, Any]], json.loads(json_blob or "[]"))
-    }
-
-
 def _metadata_link_key(link: Link) -> str:
     return f"link:{link.kind}:{link.tag}"
 
@@ -76,7 +53,7 @@ def _metadata_link_value() -> str:
     return "link"
 
 
-class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
+class ChromaGraphVectorStore(LinkBasedGraphVectorStore):
     _LANGCHAIN_DEFAULT_COLLECTION_NAME = "langchain"
 
     def __init__(
@@ -139,7 +116,7 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
         Returns:
             The document ready for use in the graph vector store
         """
-        links = _deserialize_links(doc.metadata.get(METADATA_LINKS_KEY))
+        links = deserialize_links_from_json(doc.metadata.get(METADATA_LINKS_KEY))
         doc.metadata[METADATA_LINKS_KEY] = links
         # TODO: Could this be skipped if we put these metadata entries
         # only in the searchable `metadata_s` column?
@@ -151,7 +128,7 @@ class ChromaGraphVectorStore(CassandraGraphVectorStoreBase):
     def _get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
         links = get_links(doc=doc)
         metadata = doc.metadata.copy()
-        metadata[METADATA_LINKS_KEY] = _serialize_links(links=links)
+        metadata[METADATA_LINKS_KEY] = serialize_links_to_json(links=links)
         # TODO: Could we could put these metadata entries
         # only in the searchable `metadata_s` column?
         for incoming_link in incoming_links(links=links):

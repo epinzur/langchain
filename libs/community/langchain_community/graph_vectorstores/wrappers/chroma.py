@@ -16,7 +16,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import run_in_executor
 
-from langchain_community.graph_vectorstores.interfaces import CassandraGraphInterface
+from langchain_community.graph_vectorstores.interfaces import VectorStoreForGraphInterface
 
 if TYPE_CHECKING:
     import chromadb
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from langchain_chroma import Chroma
 
 
-class ChromaVectorStoreForGraph(Chroma, CassandraGraphInterface):
+class ChromaVectorStoreForGraph(Chroma, VectorStoreForGraphInterface):
     _LANGCHAIN_DEFAULT_COLLECTION_NAME = "langchain"
 
     def __init__(

@@ -145,7 +145,6 @@ from langchain_community.graph_vectorstores.chroma import ChromaGraphVectorStore
 from langchain_community.graph_vectorstores.links import (
     Link,
 )
-from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
 
 __all__ = [
     "GraphVectorStore",
@@ -154,5 +153,4 @@ __all__ = [
     "Link",
     "CassandraGraphVectorStore",
     "ChromaGraphVectorStore",
-    "MmrHelper",
 ]

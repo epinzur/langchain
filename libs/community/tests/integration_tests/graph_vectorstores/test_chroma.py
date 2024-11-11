@@ -10,7 +10,7 @@ from langchain_core.embeddings import Embeddings
 
 from langchain_community.graph_vectorstores import ChromaGraphVectorStore
 from langchain_community.graph_vectorstores.base import METADATA_LINKS_KEY
-from langchain_community.graph_vectorstores.cassandra_base import METADATA_EMBEDDING_KEY
+from langchain_community.graph_vectorstores.link_based_gvs import METADATA_EMBEDDING_KEY
 from langchain_community.graph_vectorstores.links import (
     Link,
     add_links,
