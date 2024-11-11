@@ -18,6 +18,8 @@ from langchain_community.graph_vectorstores.interfaces import (
 from langchain_community.graph_vectorstores.links import Link, get_links, outgoing_links
 from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
 
+from langchain_community.graph_vectorstores.document_cache import DocumentCache
+
 METADATA_EMBEDDING_KEY = "__embedding"
 
 
@@ -33,8 +35,6 @@ def _set_embedding(doc: Document, embedding: list[float]) -> None:
 
 def _clear_embedding(doc: Document) -> None:
     doc.metadata.pop(METADATA_EMBEDDING_KEY, None)
-
-
 
 class LinkBasedGraphVectorStore(GraphVectorStore):
     vector_store: VectorStore
@@ -261,7 +261,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
             filter: the metadata to query for.
             n: the maximum number of documents to return.
         """
-        docs = self.cassandra_vector_store.metadata_search(
+        docs = self.vector_store_for_graph.metadata_search(
             filter=filter or {},
             n=n,
         )
@@ -278,7 +278,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
             filter: the metadata to query for.
             n: the maximum number of documents to return.
         """
-        docs = await self.cassandra_vector_store.ametadata_search(
+        docs = await self.vector_store_for_graph.ametadata_search(
             filter=filter or {},
             n=n,
         )
@@ -293,7 +293,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
         Returns:
             The the document if it exists. Otherwise None.
         """
-        doc = self.cassandra_vector_store.get_by_document_id(document_id=document_id)
+        doc = self.vector_store_for_graph.get_by_document_id(document_id=document_id)
         return self._restore_links(doc=doc) if doc is not None else None
 
     async def aget_by_document_id(self, document_id: str) -> Document | None:
@@ -305,7 +305,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
         Returns:
             The the document if it exists. Otherwise None.
         """
-        doc = await self.cassandra_vector_store.aget_by_document_id(
+        doc = await self.vector_store_for_graph.aget_by_document_id(
             document_id=document_id
         )
         return self._restore_links(doc=doc) if doc is not None else None
@@ -328,7 +328,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
         (
             query_embedding,
             rows,
-        ) = self.cassandra_vector_store.similarity_search_with_embedding(
+        ) = self.vector_store_for_graph.similarity_search_with_embedding(
             query=query,
             k=k,
             filter=filter,
@@ -344,7 +344,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
         (
             query_embedding,
             rows,
-        ) = await self.cassandra_vector_store.asimilarity_search_with_embedding(
+        ) = await self.vector_store_for_graph.asimilarity_search_with_embedding(
             query=query,
             k=k,
             filter=filter,
@@ -357,7 +357,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
         k: int,
         filter: dict[str, Any] | None = None,  # noqa: A002
     ) -> list[Document]:
-        rows = self.cassandra_vector_store.similarity_search_with_embedding_by_vector(
+        rows = self.vector_store_for_graph.similarity_search_with_embedding_by_vector(
             embedding=embedding,
             k=k,
             filter=filter,
@@ -370,7 +370,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
         k: int,
         filter: dict[str, Any] | None = None,  # noqa: A002
     ) -> list[Document]:
-        cvs = self.cassandra_vector_store
+        cvs = self.vector_store_for_graph
         rows = await cvs.asimilarity_search_with_embedding_by_vector(
             embedding=embedding,
             k=k,

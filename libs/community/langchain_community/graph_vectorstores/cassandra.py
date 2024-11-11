@@ -21,7 +21,7 @@ from langchain_community.graph_vectorstores.base import (
     Node,
 )
 from langchain_community.graph_vectorstores.link_based_gvs import (
-    CassandraGraphVectorStoreBase,
+    LinkBasedGraphVectorStore,
 )
 from langchain_community.graph_vectorstores.links import (
     deserialize_links_from_json,
@@ -53,7 +53,7 @@ def _metadata_link_value() -> str:
 
 
 @beta()
-class CassandraGraphVectorStore(CassandraGraphVectorStoreBase):
+class CassandraGraphVectorStore(LinkBasedGraphVectorStore):
     def __init__(
         self,
         embedding: Embeddings,
