@@ -102,31 +102,25 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
         Returns:
             List of (Document, embedding), the most similar to the query vector.
         """
-        # TODO: How do we also get the embedding back with open search?
-        results = self.similarity_search_by_vector(
+        ## TODO: Fix the filter after we know how to do metadata searching.
+        docs = self.similarity_search_by_vector(
             embedding=embedding,
             k = k,
             boolean_filter = filter, # this probably needs adjusting
-            metadata_field = "*", # maybe this gets the embedding???
+            metadata_field = "*",
             **kwargs,
         )
 
-        print(results)
+        print(docs)
 
-        # TBD...
         return [
             (
                 Document(
-                    page_content=result[0], metadata=result[1] or {}, id=result[2]
+                    page_content=doc.page_content, metadata=doc.metadata["metadata"] or {}, id=doc.id
                 ),
-                result[3],
+                doc.metadata["vector_field"],
             )
-            for result in zip(
-                results["documents"][0],  # type: ignore
-                results["metadatas"][0],  # type: ignore
-                results["ids"][0],  # type: ignore
-                results["embeddings"][0],  # type: ignore
-            )
+            for doc in docs
         ]
 
     async def asimilarity_search_with_embedding_by_vector(
@@ -199,6 +193,8 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
         Returns:
             The the document if it exists. Otherwise None.
         """
+        results = self
+
         results = self.get(ids=document_id)
         if len(results["documents"]) == 1:
             return Document(
