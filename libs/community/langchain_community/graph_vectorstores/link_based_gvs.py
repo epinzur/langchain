@@ -17,7 +17,11 @@ from langchain_community.graph_vectorstores.interfaces import (
 )
 from langchain_community.graph_vectorstores.links import Link, get_links, outgoing_links
 from langchain_community.graph_vectorstores.utils.document_cache import DocumentCache
-from langchain_community.graph_vectorstores.utils.document_embedding import clear_embedding, get_embedding, set_embedding
+from langchain_community.graph_vectorstores.utils.document_embedding import (
+    clear_embedding,
+    get_embedding,
+    set_embedding,
+)
 from langchain_community.graph_vectorstores.utils.mmr_helper import MmrHelper
 
 

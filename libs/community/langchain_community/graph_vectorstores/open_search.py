@@ -6,8 +6,6 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
-    Dict,
     List,
     Optional,
     Type,
@@ -15,6 +13,7 @@ from typing import (
 )
 
 from langchain_core.documents import Document
+from typing_extensions import override
 
 from langchain_community.graph_vectorstores.link_based_gvs import (
     LinkBasedGraphVectorStore,
@@ -46,17 +45,13 @@ def _metadata_link_key(link: Link) -> str:
     return f"link:{link.kind}:{link.tag}"
 
 
-def _metadata_link_value() -> str:
-    return "link"
-
-
 class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
-
     def __init__(
         self,
         opensearch_url: str,
         index_name: str,
         embedding_function: Embeddings,
+        engine: str = "lucene",
         **kwargs: Any,
     ) -> None:
         """Initialize with a Open Search client.
@@ -65,13 +60,17 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
             opensearch_url: The URL of the Open Search server
             index_name: The Open Search index to store the documents in.
             embedding_function: Embedding function to use.
+            engine: The engine to use for Efficient k-NN filtering. Must
+               be either 'lucene' or 'faiss'.
             **kwargs: Additional keyword arguments.
         """
+        self.engine = engine
         super().__init__(
             vector_store=OpenSearchVectorStoreForGraph(
                 opensearch_url=opensearch_url,
                 index_name=index_name,
                 embedding_function=embedding_function,
+                engine=engine,
                 **kwargs,
             )
         )
@@ -85,7 +84,9 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
             return metadata or {}
 
         metadata_filter = {} if metadata is None else metadata.copy()
-        metadata_filter[_metadata_link_key(link=outgoing_link)] = _metadata_link_value()
+        metadata_filter[METADATA_INCOMING_LINKS_KEY] = [
+            _metadata_link_key(link=outgoing_link)
+        ]
         return metadata_filter
 
     def _restore_links(self, doc: Document) -> Document:
@@ -99,18 +100,22 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
         """
         links = deserialize_links_from_json(doc.metadata.get(METADATA_LINKS_KEY))
         doc.metadata[METADATA_LINKS_KEY] = links
-        for incoming_link in incoming_links(links=links):
-            incoming_link_key = _metadata_link_key(link=incoming_link)
-            doc.metadata.pop(incoming_link_key, None)
+        doc.metadata.pop(METADATA_INCOMING_LINKS_KEY, None)
         return doc
 
     def _get_metadata_for_insertion(self, doc: Document) -> dict[str, Any]:
         links = get_links(doc=doc)
         metadata = doc.metadata.copy()
         metadata[METADATA_LINKS_KEY] = serialize_links_to_json(links=links)
-        for incoming_link in incoming_links(links=links):
-            metadata[_metadata_link_key(link=incoming_link)] = _metadata_link_value()
+        metadata[METADATA_INCOMING_LINKS_KEY] = [
+            _metadata_link_key(link=link) for link in incoming_links(links=links)
+        ]
         return metadata
+
+    @override
+    def add_documents(self, documents, **kwargs):
+        kwargs["engine"] = self.engine
+        return super().add_documents(documents, **kwargs)
 
     @classmethod
     def from_texts(

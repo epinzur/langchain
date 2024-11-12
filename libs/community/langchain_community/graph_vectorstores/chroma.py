@@ -40,8 +40,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-METADATA_INCOMING_LINKS_KEY = "__incoming_links"
-
 
 def _metadata_link_key(link: Link) -> str:
     return f"link:{link.kind}:{link.tag}"

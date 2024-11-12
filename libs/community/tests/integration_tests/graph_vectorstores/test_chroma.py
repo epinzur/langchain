@@ -21,6 +21,7 @@ from tests.integration_tests.cache.fake_embeddings import (
     FakeEmbeddings,
 )
 
+
 def _result_ids(docs: Iterable[Document]) -> List[Optional[str]]:
     return [doc.id for doc in docs]
 

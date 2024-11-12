@@ -1,17 +1,16 @@
 import json
 import random
-
-from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
-
 from typing import List
 
 import pytest
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 
 from langchain_community.graph_vectorstores.links import (
     Link,
     add_links,
 )
+
 
 class ParserEmbeddings(Embeddings):
     """Parse input texts: if they are json for a List[float], fine.
@@ -57,6 +56,7 @@ class EarthEmbeddings(Embeddings):
         else:
             vector = self.get_vector_near(0.1)
         return vector
+
 
 @pytest.fixture
 def earth_embeddings() -> Embeddings:

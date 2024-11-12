@@ -6,7 +6,6 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from langchain_community.vectorstores.opensearch_vector_search import OpenSearchVectorSearch
 from langchain_community.graph_vectorstores import OpenSearchGraphVectorStore
 from langchain_community.graph_vectorstores.links import (
     METADATA_LINKS_KEY,
@@ -16,6 +15,9 @@ from langchain_community.graph_vectorstores.links import (
 )
 from langchain_community.graph_vectorstores.utils.document_embedding import (
     METADATA_EMBEDDING_KEY,
+)
+from langchain_community.vectorstores.opensearch_vector_search import (
+    OpenSearchVectorSearch,
 )
 from tests.integration_tests.cache.fake_embeddings import (
     AngularTwoDimensionalEmbeddings,
@@ -31,12 +33,15 @@ def _result_ids(docs: Iterable[Document]) -> List[Optional[str]]:
     return [doc.id for doc in docs]
 
 
-def get_graph_vector_store(embedding_function: Embeddings) -> OpenSearchGraphVectorStore:
+def get_graph_vector_store(
+    embedding_function: Embeddings,
+) -> OpenSearchGraphVectorStore:
     return OpenSearchGraphVectorStore(
         opensearch_url=OPEN_SEARCH_URL,
         index_name=TEST_INDEX,
         embedding_function=embedding_function,
     )
+
 
 def cleanup(store: OpenSearchGraphVectorStore) -> None:
     os_vectorstore = cast(OpenSearchVectorSearch, store.vector_store)

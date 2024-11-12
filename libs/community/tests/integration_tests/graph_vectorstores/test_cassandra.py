@@ -26,8 +26,10 @@ from tests.integration_tests.cache.fake_embeddings import (
 
 TEST_KEYSPACE = "graph_test_keyspace"
 
+
 def _result_ids(docs: Iterable[Document]) -> List[Optional[str]]:
     return [doc.id for doc in docs]
+
 
 class CassandraSession:
     table_name: str

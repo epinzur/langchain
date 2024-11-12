@@ -141,13 +141,15 @@ from langchain_community.graph_vectorstores.base import (
 )
 from langchain_community.graph_vectorstores.cassandra import CassandraGraphVectorStore
 from langchain_community.graph_vectorstores.chroma import ChromaGraphVectorStore
-from langchain_community.graph_vectorstores.open_search import OpenSearchGraphVectorStore
 from langchain_community.graph_vectorstores.links import (
     Link,
     add_links,
     get_links,
 )
 from langchain_community.graph_vectorstores.nodes import Node
+from langchain_community.graph_vectorstores.open_search import (
+    OpenSearchGraphVectorStore,
+)
 
 __all__ = [
     "GraphVectorStore",

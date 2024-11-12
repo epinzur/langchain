@@ -1,30 +1,31 @@
 from typing import (
     Any,
-    cast,
     Dict,
     Iterable,
     List,
     Optional,
     Tuple,
+    cast,
 )
-
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import run_in_executor
+from opensearchpy import AsyncOpenSearch, OpenSearch
+from opensearchpy.exceptions import NotFoundError
+from typing_extensions import override
 
 from langchain_community.graph_vectorstores.interfaces import (
     VectorStoreForGraphInterface,
 )
+from langchain_community.vectorstores.opensearch_vector_search import (
+    OpenSearchVectorSearch,
+)
 
 
-from langchain_community.vectorstores.opensearch_vector_search import OpenSearchVectorSearch
-
-from opensearchpy import OpenSearch, AsyncOpenSearch
-
-from opensearchpy.exceptions import NotFoundError
-
-class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphInterface):
+class OpenSearchVectorStoreForGraph(
+    OpenSearchVectorSearch, VectorStoreForGraphInterface
+):
     _LANGCHAIN_DEFAULT_COLLECTION_NAME = "langchain"
 
     def _get_safe_embedding(self) -> Embeddings:
@@ -46,8 +47,37 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
             id=hit["_id"],
         )
 
-    def _build_boolean_filter(self, filter: Dict[str, Any]) -> Dict[str, Any]:
-        return [{"term": {f"metadata.{key}.k[eyword": value}} for key, value in filter.items()]
+    def _build_filter(
+        self, filter: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any] | None:
+        if filter is None:
+            return None
+        return [
+            {
+                "terms" if isinstance(value, list) else "term": {
+                    f"metadata.{key}.keyword": value
+                }
+            }
+            for key, value in filter.items()
+        ]
+
+    @override
+    def similarity_search_with_score_by_vector(
+        self,
+        embedding: List[float],
+        k: int = 4,
+        score_threshold: Optional[float] = 0.0,
+        **kwargs: Any,
+    ) -> List[Tuple[Document, float]]:
+        filter = kwargs.pop("filter", None)
+        if filter is not None:
+            kwargs["efficient_filter"] = {
+                "bool": {"must": self._build_filter(filter=filter)}
+            }
+
+        return super().similarity_search_with_score_by_vector(
+            embedding, k, score_threshold, **kwargs
+        )
 
     def similarity_search_with_embedding(
         self,
@@ -123,17 +153,19 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
             List of (Document, embedding), the most similar to the query vector.
         """
         docs = self.similarity_search_by_vector(
+            filter=filter,
             embedding=embedding,
-            k = k,
-            boolean_filter = self._build_boolean_filter(filter=filter),
-            metadata_field = "*",
+            k=k,
+            metadata_field="*",
             **kwargs,
         )
 
         return [
             (
                 Document(
-                    page_content=doc.page_content, metadata=doc.metadata["metadata"] or {}, id=doc.id
+                    page_content=doc.page_content,
+                    metadata=doc.metadata["metadata"] or {},
+                    id=doc.id,
                 ),
                 doc.metadata["vector_field"],
             )
@@ -179,24 +211,17 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
             n: the maximum number of documents to return.
         """
         body = {
-                "_source": ["text", "metadata"],
-                "query": {
-                    "bool": {
-                        "must": self._build_boolean_filter(filter=filter)
-                    }
-                },
-                "size": n,
-            }
+            "_source": ["text", "metadata"],
+            "query": {"bool": {"must": self._build_filter(filter=filter)}},
+            "size": n,
+        }
 
         results = self._sync_client().search(
             index=self.index_name,
             body=body,
         )
 
-        return [
-            self._hit_to_document(hit)
-            for hit in results["hits"]["hits"]
-        ]
+        return [self._hit_to_document(hit) for hit in results["hits"]["hits"]]
 
     async def ametadata_search(
         self,
