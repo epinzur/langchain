@@ -1,4 +1,4 @@
-"""Test of Chroma DB graph vector store class `ChromaGraphVectorStore`"""
+"""Test of Open Search graph vector store class `OpenSearchGraphVectorStore`"""
 
 from typing import Any, Generator, Iterable, List, Optional, cast
 
@@ -6,7 +6,8 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from langchain_community.graph_vectorstores import ChromaGraphVectorStore
+from langchain_community.vectorstores.opensearch_vector_search import OpenSearchVectorSearch
+from langchain_community.graph_vectorstores import OpenSearchGraphVectorStore
 from langchain_community.graph_vectorstores.links import (
     METADATA_LINKS_KEY,
     Link,
@@ -21,20 +22,32 @@ from tests.integration_tests.cache.fake_embeddings import (
     FakeEmbeddings,
 )
 
+TEST_INDEX = "graph_test_index"
+
+OPEN_SEARCH_URL = "http://localhost:9200"
+
+
 def _result_ids(docs: Iterable[Document]) -> List[Optional[str]]:
     return [doc.id for doc in docs]
 
 
-def cleanup(store: ChromaGraphVectorStore) -> None:
-    from langchain_chroma import Chroma
+def get_graph_vector_store(embedding_function: Embeddings) -> OpenSearchGraphVectorStore:
+    return OpenSearchGraphVectorStore(
+        opensearch_url=OPEN_SEARCH_URL,
+        index_name=TEST_INDEX,
+        embedding_function=embedding_function,
+    )
 
-    chroma = cast(Chroma, store.vector_store)
-    chroma.delete_collection()
+def cleanup(store: OpenSearchGraphVectorStore) -> None:
+    from opensearchpy import OpenSearch
 
+    os_vectorstore = cast(OpenSearchVectorSearch, store.vector_store)
+    os_client = cast(OpenSearch, os_vectorstore.client)
+    os_client.indices.delete(index=TEST_INDEX)
 
 @pytest.fixture(scope="function")
-def graph_vector_store_angular() -> Generator[ChromaGraphVectorStore, None, None]:
-    store = ChromaGraphVectorStore(embedding_function=AngularTwoDimensionalEmbeddings())
+def graph_vector_store_angular() -> Generator[OpenSearchGraphVectorStore, None, None]:
+    store = get_graph_vector_store(embedding_function=AngularTwoDimensionalEmbeddings())
     yield store
     cleanup(store=store)
 
@@ -42,15 +55,15 @@ def graph_vector_store_angular() -> Generator[ChromaGraphVectorStore, None, None
 @pytest.fixture(scope="function")
 def graph_vector_store_earth(
     earth_embeddings: Embeddings,
-) -> Generator[ChromaGraphVectorStore, None, None]:
-    store = ChromaGraphVectorStore(embedding_function=earth_embeddings)
+) -> Generator[OpenSearchGraphVectorStore, None, None]:
+    store = get_graph_vector_store(embedding_function=earth_embeddings)
     yield store
     cleanup(store=store)
 
 
 @pytest.fixture(scope="function")
-def graph_vector_store_fake() -> Generator[ChromaGraphVectorStore, None, None]:
-    store = ChromaGraphVectorStore(embedding_function=FakeEmbeddings())
+def graph_vector_store_fake() -> Generator[OpenSearchGraphVectorStore, None, None]:
+    store = get_graph_vector_store(embedding_function=FakeEmbeddings())
     yield store
     cleanup(store=store)
 
@@ -58,24 +71,22 @@ def graph_vector_store_fake() -> Generator[ChromaGraphVectorStore, None, None]:
 @pytest.fixture(scope="function")
 def graph_vector_store_d2(
     embedding_d2: Embeddings,
-) -> Generator[ChromaGraphVectorStore, None, None]:
-    store = ChromaGraphVectorStore(
-        embedding_function=embedding_d2,
-    )
+) -> Generator[OpenSearchGraphVectorStore, None, None]:
+    store = get_graph_vector_store(embedding_function=embedding_d2)
     yield store
     cleanup(store=store)
 
 
 @pytest.fixture(scope="function")
 def populated_graph_vector_store_d2(
-    graph_vector_store_d2: ChromaGraphVectorStore,
+    graph_vector_store_d2: OpenSearchGraphVectorStore,
     graph_vector_store_docs: list[Document],
-) -> Generator[ChromaGraphVectorStore, None, None]:
+) -> Generator[OpenSearchGraphVectorStore, None, None]:
     graph_vector_store_d2.add_documents(graph_vector_store_docs)
     yield graph_vector_store_d2
 
 
-def test_mmr_traversal(graph_vector_store_angular: ChromaGraphVectorStore) -> None:
+def test_mmr_traversal(graph_vector_store_angular: OpenSearchGraphVectorStore) -> None:
     """ Test end to end construction and MMR search.
     The embedding function used here ensures `texts` become
     the following vectors on a circle (numbered v0 through v3):
@@ -127,7 +138,7 @@ def test_mmr_traversal(graph_vector_store_angular: ChromaGraphVectorStore) -> No
 
 
 def test_write_retrieve_keywords(
-    graph_vector_store_earth: ChromaGraphVectorStore,
+    graph_vector_store_earth: OpenSearchGraphVectorStore,
 ) -> None:
     greetings = Document(
         id="greetings",
@@ -193,7 +204,7 @@ def test_write_retrieve_keywords(
     assert set(_result_ids(results)) == {"doc2", "doc1", "greetings"}
 
 
-def test_metadata(graph_vector_store_fake: ChromaGraphVectorStore) -> None:
+def test_metadata(graph_vector_store_fake: OpenSearchGraphVectorStore) -> None:
     links = [
         Link.incoming(kind="hyperlink", tag="http://a"),
         Link.bidir(kind="other", tag="foo"),
@@ -227,10 +238,10 @@ def assert_document_format(doc: Document) -> None:
     assert METADATA_EMBEDDING_KEY not in doc.metadata
 
 
-class TestChromaGraphVectorStore:
+class TestOpenSearchGraphVectorStore:
     def test_gvs_similarity_search_sync(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Simple (non-graph) similarity search on a graph vector g_store."""
         g_store = populated_graph_vector_store_d2
@@ -246,7 +257,7 @@ class TestChromaGraphVectorStore:
 
     async def test_gvs_similarity_search_async(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Simple (non-graph) similarity search on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -264,7 +275,7 @@ class TestChromaGraphVectorStore:
 
     def test_gvs_traversal_search_sync(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Graph traversal search on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -288,7 +299,7 @@ class TestChromaGraphVectorStore:
 
     async def test_gvs_traversal_search_async(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Graph traversal search on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -313,7 +324,7 @@ class TestChromaGraphVectorStore:
 
     def test_gvs_mmr_traversal_search_sync(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """MMR Graph traversal search on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -335,7 +346,7 @@ class TestChromaGraphVectorStore:
 
     async def test_gvs_mmr_traversal_search_async(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """MMR Graph traversal search on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -355,7 +366,7 @@ class TestChromaGraphVectorStore:
 
     def test_gvs_metadata_search_sync(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Metadata search on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -376,7 +387,7 @@ class TestChromaGraphVectorStore:
 
     async def test_gvs_metadata_search_async(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Metadata search on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -397,7 +408,7 @@ class TestChromaGraphVectorStore:
 
     def test_gvs_get_by_document_id_sync(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Get by document_id on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -418,7 +429,7 @@ class TestChromaGraphVectorStore:
 
     async def test_gvs_get_by_document_id_async(
         self,
-        populated_graph_vector_store_d2: ChromaGraphVectorStore,
+        populated_graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         """Get by document_id on a graph vector store."""
         g_store = populated_graph_vector_store_d2
@@ -439,7 +450,7 @@ class TestChromaGraphVectorStore:
 
     def test_gvs_from_texts(
         self,
-        graph_vector_store_d2: ChromaGraphVectorStore,
+        graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         g_store = graph_vector_store_d2
         g_store.add_texts(
@@ -458,7 +469,7 @@ class TestChromaGraphVectorStore:
 
     def test_gvs_from_documents_containing_ids(
         self,
-        graph_vector_store_d2: ChromaGraphVectorStore,
+        graph_vector_store_d2: OpenSearchGraphVectorStore,
     ) -> None:
         the_document = Document(
             page_content="[1, 2]",

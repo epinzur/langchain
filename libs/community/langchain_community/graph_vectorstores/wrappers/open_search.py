@@ -1,7 +1,5 @@
 from typing import (
-    TYPE_CHECKING,
     Any,
-    Callable,
     Dict,
     Iterable,
     List,
@@ -9,9 +7,7 @@ from typing import (
     Tuple,
 )
 
-import chromadb
-from chromadb.api.types import IncludeEnum
-from langchain_chroma import Chroma
+
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import run_in_executor
@@ -20,60 +16,12 @@ from langchain_community.graph_vectorstores.interfaces import (
     VectorStoreForGraphInterface,
 )
 
-if TYPE_CHECKING:
-    import chromadb
-    from chromadb.api.types import IncludeEnum
-    from langchain_chroma import Chroma
+
+from langchain_community.vectorstores.opensearch_vector_search import OpenSearchVectorSearch
 
 
-class ChromaVectorStoreForGraph(Chroma, VectorStoreForGraphInterface):
+class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphInterface):
     _LANGCHAIN_DEFAULT_COLLECTION_NAME = "langchain"
-
-    def __init__(
-        self,
-        collection_name: str = _LANGCHAIN_DEFAULT_COLLECTION_NAME,
-        embedding_function: Optional[Embeddings] = None,
-        persist_directory: Optional[str] = None,
-        client_settings: Optional[chromadb.config.Settings] = None,
-        collection_metadata: Optional[Dict] = None,
-        client: Optional[chromadb.ClientAPI] = None,
-        relevance_score_fn: Optional[Callable[[float], float]] = None,
-        create_collection_if_not_exists: Optional[bool] = True,
-    ) -> None:
-        """Initialize with a Chroma client.
-
-        Args:
-            collection_name: Name of the collection to create.
-            embedding_function: Embedding class object. Used to embed texts.
-            persist_directory: Directory to persist the collection.
-            client_settings: Chroma client settings
-            collection_metadata: Collection configurations.
-            client: Chroma client. Documentation:
-                    https://docs.trychroma.com/reference/js-client#class:-chromaclient
-            relevance_score_fn: Function to calculate relevance score from distance.
-                    Used only in `similarity_search_with_relevance_scores`
-            create_collection_if_not_exists: Whether to create collection
-                    if it doesn't exist. Defaults to True.
-        """
-        try:
-            from langchain_chroma import Chroma  # noqa: F401
-
-        except (ImportError, ModuleNotFoundError):
-            raise ImportError(
-                "Could not import langchain_chroma python package. "
-                "Please install it with `pip install langchain_chroma`."
-            )
-
-        super().__init__(
-            collection_name=collection_name,
-            embedding_function=embedding_function,
-            persist_directory=persist_directory,
-            client_settings=client_settings,
-            collection_metadata=collection_metadata,
-            client=client,
-            relevance_score_fn=relevance_score_fn,
-            create_collection_if_not_exists=create_collection_if_not_exists,
-        )
 
     def _get_safe_embedding(self) -> Embeddings:
         if not self.embeddings:
@@ -154,17 +102,18 @@ class ChromaVectorStoreForGraph(Chroma, VectorStoreForGraphInterface):
         Returns:
             List of (Document, embedding), the most similar to the query vector.
         """
-        results = self._collection.query(
-            query_embeddings=embedding,  # type: ignore
-            n_results=k,
-            where=filter,  # type: ignore
-            include=[
-                IncludeEnum.documents,
-                IncludeEnum.metadatas,
-                IncludeEnum.embeddings,
-            ],
+        # TODO: How do we also get the embedding back with open search?
+        results = self.similarity_search_by_vector(
+            embedding=embedding,
+            k = k,
+            boolean_filter = filter, # this probably needs adjusting
+            metadata_field = "*", # maybe this gets the embedding???
             **kwargs,
         )
+
+        print(results)
+
+        # TBD...
         return [
             (
                 Document(

@@ -141,6 +141,7 @@ from langchain_community.graph_vectorstores.base import (
 )
 from langchain_community.graph_vectorstores.cassandra import CassandraGraphVectorStore
 from langchain_community.graph_vectorstores.chroma import ChromaGraphVectorStore
+from langchain_community.graph_vectorstores.open_search import OpenSearchGraphVectorStore
 from langchain_community.graph_vectorstores.links import (
     Link,
     add_links,
@@ -157,4 +158,5 @@ __all__ = [
     "ChromaGraphVectorStore",
     "add_links",
     "get_links",
+    "OpenSearchGraphVectorStore",
 ]

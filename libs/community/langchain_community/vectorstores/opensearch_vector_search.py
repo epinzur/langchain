@@ -264,6 +264,7 @@ def _approximate_search_query_with_boolean_filter(
     score_threshold: Optional[float] = 0.0,
 ) -> Dict[str, Any]:
     """For Approximate k-NN Search, with Boolean Filter."""
+    print("using _approximate_search_query_with_boolean_filter")
     return {
         "size": k,
         "min_score": score_threshold,
