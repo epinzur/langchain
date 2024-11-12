@@ -16,25 +16,10 @@ from langchain_community.graph_vectorstores.interfaces import (
     VectorStoreForGraphInterface,
 )
 from langchain_community.graph_vectorstores.links import Link, get_links, outgoing_links
-from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
+from langchain_community.graph_vectorstores.utils.document_cache import DocumentCache
+from langchain_community.graph_vectorstores.utils.document_embedding import clear_embedding, get_embedding, set_embedding
+from langchain_community.graph_vectorstores.utils.mmr_helper import MmrHelper
 
-from langchain_community.graph_vectorstores.document_cache import DocumentCache
-
-METADATA_EMBEDDING_KEY = "__embedding"
-
-
-def _get_embedding(doc: Document) -> list[float]:
-    """Get the embedding from a document."""
-    return doc.metadata.get(METADATA_EMBEDDING_KEY, [])
-
-
-def _set_embedding(doc: Document, embedding: list[float]) -> None:
-    """Set the embedding on a document."""
-    doc.metadata[METADATA_EMBEDDING_KEY] = embedding
-
-
-def _clear_embedding(doc: Document) -> None:
-    doc.metadata.pop(METADATA_EMBEDDING_KEY, None)
 
 class LinkBasedGraphVectorStore(GraphVectorStore):
     vector_store: VectorStore
@@ -315,7 +300,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
     ) -> list[Document]:
         docs: list[Document] = []
         for doc, embedding in rows:
-            _set_embedding(doc=doc, embedding=embedding)
+            set_embedding(doc=doc, embedding=embedding)
             docs.append(self._restore_links(doc=doc))
         return docs
 
@@ -393,8 +378,21 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
                 outgoing_links_map[node.id] = set(
                     outgoing_links(links=get_links(doc=node))
                 )
-                candidates[node.id] = _get_embedding(doc=node)
+                candidates[node.id] = get_embedding(doc=node)
         return candidates
+
+    def add_scores_to_docs(
+        self, docs: Iterable[Document], helper: MmrHelper
+    ) -> Iterable[Document]:
+        for doc, similarity_score, mmr_score in zip(
+            docs,
+            helper.selected_similarity_scores,
+            helper.selected_mmr_scores,
+        ):
+            doc.metadata["similarity_score"] = similarity_score
+            doc.metadata["mmr_score"] = mmr_score
+            clear_embedding(doc)
+            yield doc
 
     @override
     def mmr_traversal_search(  # noqa: C901
@@ -565,15 +563,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
                 helper.add_candidates(new_candidates)
 
         docs = doc_cache.get_by_document_ids(doc_ids=helper.selected_ids)
-
-        for doc, similarity_score, mmr_score in zip(
-            docs,
-            helper.selected_similarity_scores,
-            helper.selected_mmr_scores,
-        ):
-            doc.metadata["similarity_score"] = similarity_score
-            doc.metadata["mmr_score"] = mmr_score
-            _clear_embedding(doc)
+        for doc in self.add_scores_to_docs(docs=docs, helper=helper):
             yield doc
 
     @override
@@ -758,15 +748,7 @@ class LinkBasedGraphVectorStore(GraphVectorStore):
                 helper.add_candidates(new_candidates)
 
         docs = doc_cache.get_by_document_ids(doc_ids=helper.selected_ids)
-
-        for doc, similarity_score, mmr_score in zip(
-            docs,
-            helper.selected_similarity_scores,
-            helper.selected_mmr_scores,
-        ):
-            doc.metadata["similarity_score"] = similarity_score
-            doc.metadata["mmr_score"] = mmr_score
-            _clear_embedding(doc)
+        for doc in self.add_scores_to_docs(docs=docs, helper=helper):
             yield doc
 
     def _get_initial(

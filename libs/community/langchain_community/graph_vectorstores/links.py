@@ -1,12 +1,10 @@
+import json
 from collections.abc import Iterable
-from dataclasses import dataclass
-from typing import Any, cast, Literal, Union
+from dataclasses import asdict, dataclass, is_dataclass
+from typing import Any, Literal, Union, cast
 
 from langchain_core._api import beta
 from langchain_core.documents import Document
-
-import json
-from dataclasses import asdict, is_dataclass
 
 METADATA_LINKS_KEY = "links"
 
@@ -160,6 +158,7 @@ class Link:
         """
         return Link(kind=kind, direction="bidir", tag=tag)
 
+
 def serialize_links_to_json(links: list[Link]) -> str:
     class SetAndLinkEncoder(json.JSONEncoder):
         def default(self, obj: Any) -> Any:  # noqa: ANN401
@@ -173,6 +172,7 @@ def serialize_links_to_json(links: list[Link]) -> str:
             return super().default(obj)
 
     return json.dumps(links, cls=SetAndLinkEncoder)
+
 
 def deserialize_links_from_json(json_blob: str | None) -> set[Link]:
     return {

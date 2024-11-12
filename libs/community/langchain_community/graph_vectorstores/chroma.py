@@ -8,31 +8,28 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Iterable,
     List,
     Optional,
     Type,
     TypeVar,
-    cast,
 )
 
 from langchain_core.documents import Document
 
-from langchain_community.graph_vectorstores.base import (
-    _texts_to_documents,
-)
 from langchain_community.graph_vectorstores.link_based_gvs import (
     LinkBasedGraphVectorStore,
 )
 from langchain_community.graph_vectorstores.links import (
-    deserialize_links_from_json,
     METADATA_LINKS_KEY,
     Link,
+    deserialize_links_from_json,
     get_links,
     incoming_links,
     serialize_links_to_json,
 )
-from langchain_community.graph_vectorstores.wrappers import ChromaVectorStoreForGraph
+from langchain_community.graph_vectorstores.wrappers.chroma import (
+    ChromaVectorStoreForGraph,
+)
 
 ChromaGVS = TypeVar("ChromaGVS", bound="ChromaGraphVectorStore")
 
@@ -44,6 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 METADATA_INCOMING_LINKS_KEY = "__incoming_links"
+
 
 def _metadata_link_key(link: Link) -> str:
     return f"link:{link.kind}:{link.tag}"
@@ -118,8 +116,6 @@ class ChromaGraphVectorStore(LinkBasedGraphVectorStore):
         """
         links = deserialize_links_from_json(doc.metadata.get(METADATA_LINKS_KEY))
         doc.metadata[METADATA_LINKS_KEY] = links
-        # TODO: Could this be skipped if we put these metadata entries
-        # only in the searchable `metadata_s` column?
         for incoming_link in incoming_links(links=links):
             incoming_link_key = _metadata_link_key(link=incoming_link)
             doc.metadata.pop(incoming_link_key, None)
@@ -129,8 +125,6 @@ class ChromaGraphVectorStore(LinkBasedGraphVectorStore):
         links = get_links(doc=doc)
         metadata = doc.metadata.copy()
         metadata[METADATA_LINKS_KEY] = serialize_links_to_json(links=links)
-        # TODO: Could we could put these metadata entries
-        # only in the searchable `metadata_s` column?
         for incoming_link in incoming_links(links=links):
             metadata[_metadata_link_key(link=incoming_link)] = _metadata_link_value()
         return metadata

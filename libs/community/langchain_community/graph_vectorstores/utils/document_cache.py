@@ -2,6 +2,7 @@ from typing import Iterable, Iterator
 
 from langchain_core.documents import Document
 
+
 class DocumentCache:
     documents: dict[str, Document] = {}
 

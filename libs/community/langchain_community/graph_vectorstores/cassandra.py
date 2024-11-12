@@ -24,9 +24,9 @@ from langchain_community.graph_vectorstores.link_based_gvs import (
     LinkBasedGraphVectorStore,
 )
 from langchain_community.graph_vectorstores.links import (
-    deserialize_links_from_json,
     METADATA_LINKS_KEY,
     Link,
+    deserialize_links_from_json,
     get_links,
     incoming_links,
     serialize_links_to_json,

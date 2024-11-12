@@ -138,13 +138,15 @@ such as ``traversal`` and ``mmr_traversal``::
 from langchain_community.graph_vectorstores.base import (
     GraphVectorStore,
     GraphVectorStoreRetriever,
-    Node,
 )
 from langchain_community.graph_vectorstores.cassandra import CassandraGraphVectorStore
 from langchain_community.graph_vectorstores.chroma import ChromaGraphVectorStore
 from langchain_community.graph_vectorstores.links import (
     Link,
+    add_links,
+    get_links,
 )
+from langchain_community.graph_vectorstores.nodes import Node
 
 __all__ = [
     "GraphVectorStore",
@@ -153,4 +155,6 @@ __all__ = [
     "Link",
     "CassandraGraphVectorStore",
     "ChromaGraphVectorStore",
+    "add_links",
+    "get_links",
 ]

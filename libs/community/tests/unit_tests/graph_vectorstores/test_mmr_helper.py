@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from langchain_community.graph_vectorstores.mmr_helper import MmrHelper
+from langchain_community.graph_vectorstores.utils.mmr_helper import MmrHelper
 
 IDS = {
     "-1",
