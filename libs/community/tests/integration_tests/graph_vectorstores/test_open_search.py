@@ -1,6 +1,6 @@
 """Test of Open Search graph vector store class `OpenSearchGraphVectorStore`"""
 
-from typing import Any, Generator, Iterable, List, Optional, cast
+from typing import Generator, Iterable, List, Optional, cast
 
 import pytest
 from langchain_core.documents import Document

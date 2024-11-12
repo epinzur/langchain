@@ -1,6 +1,6 @@
 """Test of Chroma DB graph vector store class `ChromaGraphVectorStore`"""
 
-from typing import Any, Generator, Iterable, List, Optional, cast
+from typing import Generator, Iterable, List, Optional, cast
 
 import pytest
 from langchain_core.documents import Document

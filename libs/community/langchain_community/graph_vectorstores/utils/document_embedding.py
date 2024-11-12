@@ -1,6 +1,6 @@
-METADATA_EMBEDDING_KEY = "__embedding"
-
 from langchain_core.documents import Document
+
+METADATA_EMBEDDING_KEY = "__embedding"
 
 
 def get_embedding(doc: Document) -> list[float]:

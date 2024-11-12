@@ -6,6 +6,7 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
+    Iterable,
     List,
     Optional,
     Type,
@@ -113,7 +114,17 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
         return metadata
 
     @override
-    def add_documents(self, documents, **kwargs):
+    def add_documents(
+        self,
+        documents: Iterable[Document],
+        **kwargs: Any,
+    ) -> list[str]:
+        """Add document nodes to the graph vector store.
+
+        Args:
+            documents: the document nodes to add.
+            **kwargs: Additional keyword arguments.
+        """
         kwargs["engine"] = self.engine
         return super().add_documents(documents, **kwargs)
 
@@ -125,8 +136,6 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
         metadatas: Optional[List[dict]] = None,
         *,
         ids: Optional[List[str]] = None,
-        opensearch_url: str,
-        index_name: str,
         **kwargs: Any,
     ) -> OpenSearchGVS:
         """Create a OpenSearchGraphVectorStore from raw texts.
@@ -136,16 +145,14 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
             embedding: Embedding function to use.
             metadatas: Optional list of metadatas associated with the texts.
             ids: Optional list of IDs associated with the texts.
-            opensearch_url: The URL of the Open Search server
-            index_name: The Open Search index to store the documents in.
-            **kwargs: Additional keyword arguments.
+            **kwargs:
+                opensearch_url: The URL of the Open Search server.
+                index_name: The Open Search index to store the documents in.
 
         Returns:
             a OpenSearchGraphVectorStore.
         """
         store = cls(
-            opensearch_url=opensearch_url,
-            index_name=index_name,
             embedding_function=embedding,
             **kwargs,
         )
@@ -164,8 +171,6 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
         metadatas: Optional[List[dict]] = None,
         *,
         ids: Optional[List[str]] = None,
-        opensearch_url: str,
-        index_name: str,
         **kwargs: Any,
     ) -> OpenSearchGVS:
         """Create a OpenSearchGraphVectorStore from raw texts.
@@ -175,16 +180,14 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
             embedding: Embedding function to use.
             metadatas: Optional list of metadatas associated with the texts.
             ids: Optional list of IDs associated with the texts.
-            opensearch_url: The URL of the Open Search server
-            index_name: The Open Search index to store the documents in.
-            **kwargs: Additional keyword arguments.
+            **kwargs:
+                opensearch_url: The URL of the Open Search server.
+                index_name: The Open Search index to store the documents in.
 
         Returns:
             a OpenSearchGraphVectorStore.
         """
         store = cls(
-            opensearch_url=opensearch_url,
-            index_name=index_name,
             embedding_function=embedding,
             **kwargs,
         )
@@ -202,8 +205,6 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
         embedding: Embeddings,
         *,
         ids: Optional[List[str]] = None,
-        opensearch_url: str,
-        index_name: str,
         **kwargs: Any,
     ) -> OpenSearchGVS:
         """Create a OpenSearchGraphVectorStore from a document list.
@@ -214,14 +215,14 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
             ids: Optional list of IDs associated with the texts.
             opensearch_url: The URL of the Open Search server
             index_name: The Open Search index to store the documents in.
-            **kwargs: Additional keyword arguments.
+            **kwargs:
+                opensearch_url: The URL of the Open Search server.
+                index_name: The Open Search index to store the documents in.
 
         Returns:
             a OpenSearchGraphVectorStore.
         """
         store = cls(
-            opensearch_url=opensearch_url,
-            index_name=index_name,
             embedding_function=embedding,
             **kwargs,
         )
@@ -238,8 +239,6 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
         embedding: Embeddings,
         *,
         ids: Optional[List[str]] = None,
-        opensearch_url: str,
-        index_name: str,
         **kwargs: Any,
     ) -> OpenSearchGVS:
         """Create a OpenSearchGraphVectorStore from a document list.
@@ -250,14 +249,14 @@ class OpenSearchGraphVectorStore(LinkBasedGraphVectorStore):
             ids: Optional list of IDs associated with the texts.
             opensearch_url: The URL of the Open Search server
             index_name: The Open Search index to store the documents in.
-            **kwargs: Additional keyword arguments.
+            **kwargs:
+                opensearch_url: The URL of the Open Search server.
+                index_name: The Open Search index to store the documents in.
 
         Returns:
             a OpenSearchGraphVectorStore.
         """
         store = cls(
-            opensearch_url=opensearch_url,
-            index_name=index_name,
             embedding_function=embedding,
             **kwargs,
         )

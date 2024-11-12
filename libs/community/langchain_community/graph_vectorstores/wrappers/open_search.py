@@ -49,7 +49,7 @@ class OpenSearchVectorStoreForGraph(
 
     def _build_filter(
         self, filter: Optional[Dict[str, str]] = None
-    ) -> Dict[str, Any] | None:
+    ) -> List[Dict[str, Any]] | None:
         if filter is None:
             return None
         return [
@@ -236,7 +236,7 @@ class OpenSearchVectorStoreForGraph(
         """
         return await run_in_executor(None, self.metadata_search, filter, n)
 
-    def get_by_document_id(self, document_id: str, **kwargs) -> Document | None:
+    def get_by_document_id(self, document_id: str, **kwargs: Any) -> Document | None:
         """Retrieve a single document node from the graph vector store, given its id.
 
         Args:
