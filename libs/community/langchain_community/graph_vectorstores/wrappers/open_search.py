@@ -1,5 +1,6 @@
 from typing import (
     Any,
+    cast,
     Dict,
     Iterable,
     List,
@@ -19,6 +20,9 @@ from langchain_community.graph_vectorstores.interfaces import (
 
 from langchain_community.vectorstores.opensearch_vector_search import OpenSearchVectorSearch
 
+from opensearchpy import OpenSearch, AsyncOpenSearch
+
+from opensearchpy.exceptions import NotFoundError
 
 class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphInterface):
     _LANGCHAIN_DEFAULT_COLLECTION_NAME = "langchain"
@@ -28,6 +32,22 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
             msg = "Missing embedding"
             raise ValueError(msg)
         return self.embeddings
+
+    def _sync_client(self) -> OpenSearch:
+        return cast(OpenSearch, self.client)
+
+    def _async_client(self) -> AsyncOpenSearch:
+        return cast(AsyncOpenSearch, self.async_client)
+
+    def _hit_to_document(self, hit: Any) -> Document:
+        return Document(
+            page_content=hit["_source"]["text"],
+            metadata=hit["_source"]["metadata"],
+            id=hit["_id"],
+        )
+
+    def _build_boolean_filter(self, filter: Dict[str, Any]) -> Dict[str, Any]:
+        return [{"term": {f"metadata.{key}.k[eyword": value}} for key, value in filter.items()]
 
     def similarity_search_with_embedding(
         self,
@@ -102,16 +122,13 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
         Returns:
             List of (Document, embedding), the most similar to the query vector.
         """
-        ## TODO: Fix the filter after we know how to do metadata searching.
         docs = self.similarity_search_by_vector(
             embedding=embedding,
             k = k,
-            boolean_filter = filter, # this probably needs adjusting
+            boolean_filter = self._build_boolean_filter(filter=filter),
             metadata_field = "*",
             **kwargs,
         )
-
-        print(docs)
 
         return [
             (
@@ -161,14 +178,24 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
             filter: the metadata to query for.
             n: the maximum number of documents to return.
         """
-        results = self.get(where=filter, limit=n)
+        body = {
+                "_source": ["text", "metadata"],
+                "query": {
+                    "bool": {
+                        "must": self._build_boolean_filter(filter=filter)
+                    }
+                },
+                "size": n,
+            }
+
+        results = self._sync_client().search(
+            index=self.index_name,
+            body=body,
+        )
+
         return [
-            Document(page_content=result[0], metadata=result[1] or {}, id=result[2])
-            for result in zip(
-                results["documents"],
-                results["metadatas"],
-                results["ids"],
-            )
+            self._hit_to_document(hit)
+            for hit in results["hits"]["hits"]
         ]
 
     async def ametadata_search(
@@ -184,7 +211,7 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
         """
         return await run_in_executor(None, self.metadata_search, filter, n)
 
-    def get_by_document_id(self, document_id: str) -> Document | None:
+    def get_by_document_id(self, document_id: str, **kwargs) -> Document | None:
         """Retrieve a single document node from the graph vector store, given its id.
 
         Args:
@@ -193,16 +220,16 @@ class OpenSearchVectorStoreForGraph(OpenSearchVectorSearch, VectorStoreForGraphI
         Returns:
             The the document if it exists. Otherwise None.
         """
-        results = self
 
-        results = self.get(ids=document_id)
-        if len(results["documents"]) == 1:
-            return Document(
-                page_content=results["documents"][0],
-                metadata=results["metadatas"][0],
-                id=results["ids"][0],
+        try:
+            hit = self._sync_client().get(
+                index=self.index_name,
+                id=document_id,
+                _source_includes=["text", "metadata"],
             )
-        return None
+            return self._hit_to_document(hit)
+        except NotFoundError:
+            return None
 
     async def aget_by_document_id(self, document_id: str) -> Document | None:
         """Retrieve a single document node from the store, given its id.

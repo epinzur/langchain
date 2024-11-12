@@ -39,11 +39,9 @@ def get_graph_vector_store(embedding_function: Embeddings) -> OpenSearchGraphVec
     )
 
 def cleanup(store: OpenSearchGraphVectorStore) -> None:
-    from opensearchpy import OpenSearch
-
     os_vectorstore = cast(OpenSearchVectorSearch, store.vector_store)
-    os_client = cast(OpenSearch, os_vectorstore.client)
-    os_client.indices.delete(index=TEST_INDEX)
+    os_vectorstore.delete_index(index_name=TEST_INDEX)
+
 
 @pytest.fixture(scope="function")
 def graph_vector_store_angular() -> Generator[OpenSearchGraphVectorStore, None, None]:
