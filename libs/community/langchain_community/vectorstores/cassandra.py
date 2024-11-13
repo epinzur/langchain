@@ -13,6 +13,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -528,6 +529,61 @@ class Cassandra(VectorStore):
         if row is None:
             return None
         return self._row_to_document(row=row)
+
+    def get_by_ids(self, ids: Sequence[str], /) -> list[Document]:
+        """Get documents by their IDs.
+
+        The returned documents are expected to have the ID field set to the ID of the
+        document in the vector store.
+
+        Fewer documents may be returned than requested if some IDs are not found or
+        if there are duplicated IDs.
+
+        Users should not assume that the order of the returned documents matches
+        the order of the input IDs. Instead, users should rely on the ID field of the
+        returned documents.
+
+        This method should **NOT** raise exceptions if no documents are found for
+        some IDs.
+
+        Args:
+            ids: List of ids to retrieve.
+
+        Returns:
+            List of Documents.
+
+        .. versionadded:: 0.2.11
+        """
+        self.table.find_entries
+        msg = f"{self.__class__.__name__} does not yet support get_by_ids."
+        raise NotImplementedError(msg)
+
+    # Implementations should override this method to provide an async native version.
+    async def aget_by_ids(self, ids: Sequence[str], /) -> list[Document]:
+        """Async get documents by their IDs.
+
+        The returned documents are expected to have the ID field set to the ID of the
+        document in the vector store.
+
+        Fewer documents may be returned than requested if some IDs are not found or
+        if there are duplicated IDs.
+
+        Users should not assume that the order of the returned documents matches
+        the order of the input IDs. Instead, users should rely on the ID field of the
+        returned documents.
+
+        This method should **NOT** raise exceptions if no documents are found for
+        some IDs.
+
+        Args:
+            ids: List of ids to retrieve.
+
+        Returns:
+            List of Documents.
+
+        .. versionadded:: 0.2.11
+        """
+        return await run_in_executor(None, self.get_by_ids, ids)
 
     def metadata_search(
         self,

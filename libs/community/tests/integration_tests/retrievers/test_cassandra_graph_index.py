@@ -455,7 +455,7 @@ class TestCassandraGraphIndex:
     ) -> None:
         """Simple (non-graph) similarity search on a graph vector store."""
         g_index = graph_index_d2_traversal_depth_0
-        g_index.upsert(graph_vector_store_docs)
+        await g_index.aupsert(graph_vector_store_docs)
         ss_response = await g_index.invoke(query="[2, 10]")
         ss_labels = [doc.metadata["label"] for doc in ss_response]
         assert ss_labels == ["AR", "A0"]
@@ -483,7 +483,7 @@ class TestCassandraGraphIndex:
     ) -> None:
         """Graph traversal search on a graph vector store."""
         g_index = graph_index_d2_traversal_depth_2
-        g_index.upsert(graph_vector_store_docs)
+        await g_index.aupsert(graph_vector_store_docs)
         ts_labels = set()
         async for doc in g_index.ainvoke(query="[2, 10]"):
             ts_labels.add(doc.metadata["label"])
@@ -514,7 +514,7 @@ class TestCassandraGraphIndex:
     ) -> None:
         """MMR Graph traversal search on a graph vector store."""
         g_index = graph_index_d2_mmr
-        g_index.upsert(graph_vector_store_docs)
+        await g_index.aupsert(graph_vector_store_docs)
         mt_labels = set()
         async for doc in g_index.ainvoke(input="[2, 10]"):
             mt_labels.add(doc.metadata["label"])
@@ -524,11 +524,11 @@ class TestCassandraGraphIndex:
 
     def test_gvs_metadata_search_sync(
         self,
-        populated_graph_index_d2: CassandraGraphIndex,
+        graph_index_d2_mmr: CassandraGraphIndex,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Metadata search on a graph vector store."""
-        g_index = populated_graph_index_d2
+        g_index = graph_index_d2_mmr
         g_index.upsert(graph_vector_store_docs)
         mt_response = g_index._metadata_search(
             filter={"label": "T0"},
@@ -548,12 +548,12 @@ class TestCassandraGraphIndex:
 
     async def test_gvs_metadata_search_async(
         self,
-        populated_graph_index_d2: CassandraGraphIndex,
+        graph_index_d2_mmr: CassandraGraphIndex,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Metadata search on a graph vector store."""
-        g_index = populated_graph_index_d2
-        g_index.upsert(graph_vector_store_docs)
+        g_index = graph_index_d2_mmr
+        await g_index.aupsert(graph_vector_store_docs)
         mt_response = await g_index._ametadata_search(
             filter={"label": "T0"},
             n=2,
@@ -572,13 +572,13 @@ class TestCassandraGraphIndex:
 
     def test_gvs_get_by_document_id_sync(
         self,
-        populated_graph_index_d2: CassandraGraphIndex,
+        graph_index_d2_mmr: CassandraGraphIndex,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Get by document_id on a graph vector store."""
-        g_index = populated_graph_index_d2
+        g_index = graph_index_d2_mmr
         g_index.upsert(graph_vector_store_docs)
-        docs = g_index.get(ids=["FL"])
+        docs = g_index.get(["FL"])
         assert len(docs) == 1
         doc:Document = docs[0]
         assert doc.page_content == "[1, -9]"
@@ -592,18 +592,18 @@ class TestCassandraGraphIndex:
         # assert link.tag == "tag_l"
         assert_document_format(doc)
 
-        invalid_docs = g_index.get(ids=["invalid"])
+        invalid_docs = g_index.get(["invalid"])
         assert len(invalid_docs) == 0
 
     async def test_gvs_get_by_document_id_async(
         self,
-        populated_graph_index_d2: CassandraGraphIndex,
+        graph_index_d2_mmr: CassandraGraphIndex,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Get by document_id on a graph vector store."""
-        g_index = populated_graph_index_d2
-        g_index.upsert(graph_vector_store_docs)
-        docs = await g_index.aget(ids=["FL"])
+        g_index = graph_index_d2_mmr
+        await g_index.aupsert(graph_vector_store_docs)
+        docs = await g_index.aget(["FL"])
         assert len(docs) == 1
         doc: Document = docs[0]
         assert doc.page_content == "[1, -9]"
@@ -617,5 +617,5 @@ class TestCassandraGraphIndex:
         # assert link.tag == "tag_l"
         assert_document_format(doc)
 
-        invalid_docs = await g_index.aget(ids=["invalid"])
+        invalid_docs = await g_index.aget(["invalid"])
         assert len(invalid_docs) == 0
