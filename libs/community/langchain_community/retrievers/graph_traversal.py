@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING, Any, AsyncIterable, Iterable, Iterator, Protocol, Tuple, Union
+from typing import Any, Iterable, Iterator, Literal, Tuple, Union, cast
 
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForRetrieverRun,
@@ -11,10 +11,21 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
 
+from pydantic import BaseModel
+
 from abc import abstractmethod
 
-class GraphVectorStore(VectorStore):
+class Edge():
+    direction: str = Literal['bi-dir', 'in', 'out']
+    key: str
+    value: Any
 
+    def __init__(self, direction=str, key=str, value=Any):
+        self.direction = direction
+        self.key = key
+        self.value = value
+
+class GraphVectorStore(VectorStore):
     @abstractmethod
     def metadata_search(
         self,
@@ -55,106 +66,79 @@ class DocumentCache:
     def get_by_document_ids(
         self,
         doc_ids: Iterable[str],
-    ) -> Iterator[Document]:
+    ) -> list[Document]:
+        docs: list[Document] = []
         for doc_id in doc_ids:
             if doc_id in self.documents:
-                yield self.documents[doc_id]
+                docs.append(self.documents[doc_id])
             else:
                 msg = f"unexpected, cache should contain id: {doc_id}"
                 raise RuntimeError(msg)
+        return docs
 
 class GraphTraversalRetriever(BaseRetriever):
     vector_store: VectorStore
     edges: Iterable[Union[str, Tuple[str, str]]]
-    k: int
+
+    @property
+    def _graph_vector_store(self) -> GraphVectorStore:
+        return cast(GraphVectorStore, self.vector_store)
 
     def _get_relevant_documents(
-        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun,
+        k: int = 4,
+        depth: int = 1,
+        filter: dict[str, Any] | None = None,
     ) -> list[Document]:
         """Get documents relevant to a query.
 
         Args:
             query: String to find relevant documents for.
             run_manager: The callback handler to use.
-        Returns:
-            List of relevant documents.
-        """
-
-    async def _aget_relevant_documents(
-        self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun
-    ) -> list[Document]:
-        """Asynchronously get documents relevant to a query.
-
-        Args:
-            query: String to find relevant documents for
-            run_manager: The callback handler to use
-        Returns:
-            List of relevant documents
-        """
-
-    def traversal_search(  # noqa: C901
-        self,
-        query: str,
-        *,
-        k: int = 4,
-        depth: int = 1,
-        filter: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> Iterable[Document]:
-        """Retrieve documents from this knowledge store.
-
-        First, `k` nodes are retrieved using a vector search for the `query` string.
-        Then, additional nodes are discovered up to the given `depth` from those
-        starting nodes.
-
-        Args:
-            query: The query string.
             k: The number of Documents to return from the initial vector search.
                 Defaults to 4.
             depth: The maximum depth of edges to traverse. Defaults to 1.
             filter: Optional metadata to filter the results.
-            **kwargs: Additional keyword arguments.
-
         Returns:
-            Collection of retrieved documents.
+            List of relevant documents.
         """
         # Depth 0:
         #   Query for `k` document nodes similar to the question.
-        #   Retrieve `content_id` and `outgoing_links()`.
+        #   Retrieve `id` and `outgoing_edges`.
         #
         # Depth 1:
-        #   Query for document nodes that have an incoming link in `outgoing_links()`.
+        #   Query for document nodes that have an incoming edge in `outgoing_edges`.
         #   Combine node IDs.
-        #   Query for `outgoing_links()` of those "new" node IDs.
+        #   Query for `outgoing_edges` of those "new" node IDs.
         #
         # ...
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}
 
-        # Map from visited link to depth
-        visited_links: dict[str, int] = {}
+        # Map from visited edge to depth
+        visited_edges: dict[Edge, int] = {}
 
         doc_cache = DocumentCache()
 
         def visit_nodes(d: int, nodes: Iterable[Document]) -> None:
-            """Recursively visit document nodes and their outgoing links."""
-            _outgoing_links = self._gather_outgoing_links(
+            """Recursively visit document nodes and their outgoing edges."""
+            _outgoing_edges = self._gather_outgoing_edges(
                 nodes=nodes,
                 visited_ids=visited_ids,
-                visited_links=visited_links,
+                visited_edges=visited_edges,
                 d=d,
                 depth=depth,
             )
 
-            if _outgoing_links:
-                for outgoing_link in _outgoing_links:
+            if _outgoing_edges:
+                for outgoing_edge in _outgoing_edges:
                     metadata_filter = self._get_metadata_filter(
                         metadata=filter,
-                        outgoing_link=outgoing_link,
+                        outgoing_edge=outgoing_edge,
                     )
 
-                    docs = list(self.metadata_search(filter=metadata_filter, n=1000))
+                    docs = list(self._graph_vector_store.metadata_search(filter=metadata_filter, n=1000))
                     doc_cache.add_documents(docs)
 
                     new_ids_at_next_depth: set[str] = set()
@@ -170,7 +154,7 @@ class GraphTraversalRetriever(BaseRetriever):
                         visit_nodes(d=d + 1, nodes=nodes)
 
         # Start the traversal
-        initial_nodes = self.similarity_search(
+        initial_nodes = self.vector_store.similarity_search(
             query=query,
             k=k,
             filter=filter,
@@ -181,72 +165,64 @@ class GraphTraversalRetriever(BaseRetriever):
         return doc_cache.get_by_document_ids(doc_ids=visited_ids)
 
 
-    async def atraversal_search(  # noqa: C901
-        self,
-        query: str,
-        *,
+    async def _aget_relevant_documents(
+        self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun,
         k: int = 4,
         depth: int = 1,
         filter: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterable[Document]:
-        """Retrieve documents from this knowledge store.
-
-        First, `k` nodes are retrieved using a vector search for the `query` string.
-        Then, additional nodes are discovered up to the given `depth` from those
-        starting nodes.
+    ) -> list[Document]:
+        """Asynchronously get documents relevant to a query.
 
         Args:
-            query: The query string.
+            query: String to find relevant documents for.
+            run_manager: The callback handler to use.
             k: The number of Documents to return from the initial vector search.
                 Defaults to 4.
             depth: The maximum depth of edges to traverse. Defaults to 1.
             filter: Optional metadata to filter the results.
-            **kwargs: Additional keyword arguments.
-
         Returns:
-            Collection of retrieved documents.
+            List of relevant documents
         """
         # Depth 0:
         #   Query for `k` document nodes similar to the question.
-        #   Retrieve `content_id` and `outgoing_links()`.
+        #   Retrieve `content_id` and `outgoing_edges()`.
         #
         # Depth 1:
-        #   Query for document nodes that have an incoming link in`outgoing_links()`.
+        #   Query for document nodes that have an incoming edge in`outgoing_edges()`.
         #   Combine node IDs.
-        #   Query for `outgoing_links()` of those "new" node IDs.
+        #   Query for `outgoing_edges()` of those "new" node IDs.
         #
         # ...
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}
 
-        # Map from visited link to depth
-        visited_links: dict[str, int] = {}
+        # Map from visited edge to depth
+        visited_edges: dict[Edge, int] = {}
 
         doc_cache = DocumentCache()
 
         async def visit_nodes(d: int, nodes: Iterable[Document]) -> None:
-            """Recursively visit document nodes and their outgoing links."""
-            _outgoing_links = self._gather_outgoing_links(
+            """Recursively visit document nodes and their outgoing edges."""
+            _outgoing_edges = self._gather_outgoing_edges(
                 nodes=nodes,
                 visited_ids=visited_ids,
-                visited_links=visited_links,
+                visited_edges=visited_edges,
                 d=d,
                 depth=depth,
             )
 
-            if _outgoing_links:
+            if _outgoing_edges:
                 metadata_search_tasks = [
                     asyncio.create_task(
-                        self.ametadata_search(
+                        self._graph_vector_store.ametadata_search(
                             filter=self._get_metadata_filter(
-                                metadata=filter, outgoing_link=outgoing_link
+                                metadata=filter, outgoing_edge=outgoing_edge
                             ),
                             n=1000,
                         )
                     )
-                    for outgoing_link in _outgoing_links
+                    for outgoing_edge in _outgoing_edges
                 ]
 
                 for search_task in asyncio.as_completed(metadata_search_tasks):
@@ -267,7 +243,7 @@ class GraphTraversalRetriever(BaseRetriever):
                         await visit_nodes(d=d + 1, nodes=nodes)
 
         # Start the traversal
-        initial_nodes = await self.asimilarity_search(
+        initial_nodes = await self.vector_store.asimilarity_search(
             query=query,
             k=k,
             filter=filter,
@@ -275,5 +251,76 @@ class GraphTraversalRetriever(BaseRetriever):
         doc_cache.add_documents(docs=initial_nodes)
         await visit_nodes(d=0, nodes=initial_nodes)
 
-        for doc in doc_cache.get_by_document_ids(doc_ids=visited_ids):
-            yield doc
+        return doc_cache.get_by_document_ids(doc_ids=visited_ids)
+
+    def _get_edges(self, direction:str, key: str, value: Any) -> set[Edge]:
+        if isinstance(value, str):
+            return { Edge(direction=direction, key=key, value=value) }
+        elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+            return {Edge(direction=direction, key=key, value=item) for item in value}
+        else:
+            raise TypeError("Expected a string or an iterable of strings, but got an unsupported type.")
+
+    def _get_outgoing_edges(self, doc: Document) -> set[Edge]:
+        outgoing_edges = set()
+        for edge in self.edges:
+            if isinstance(edge, str):
+                if edge in doc.metadata:
+                    outgoing_edges.update(self._get_edges(direction="bi-dir", key=edge, value=doc.metadata[edge]))
+            elif isinstance(edge, tuple) and len(edge) == 2 and all(isinstance(item, str) for item in edge):
+                if edge[0] in doc.metadata:
+                    outgoing_edges.update(self._get_edges(direction="out", key=edge[0], value=doc.metadata[edge[0]]))
+            else:
+                raise ValueError("Invalid type for edge. must be 'str' or 'tuple[str,str]'")
+        return outgoing_edges
+
+    def _gather_outgoing_edges(
+        self,
+        nodes: Iterable[Document],
+        visited_ids: dict[str, int],
+        visited_edges: dict[Edge, int],
+        d: int,
+        depth: int,
+    ) -> set[Edge]:
+        # Iterate over document nodes, tracking the *new* outgoing edges for this
+        # depth. These are edges that are either new, or newly discovered at a
+        # lower depth.
+        _outgoing_edges: set[Edge] = set()
+        for node in nodes:
+            if node.id is not None:
+                # If this document node is at a closer depth, update visited_ids
+                if d <= visited_ids.get(node.id, depth):
+                    visited_ids[node.id] = d
+                    # If we can continue traversing from this document node,
+                    if d < depth:
+                        # Record any new (or newly discovered at a lower depth)
+                        # edges to the set to traverse.
+                        for edge in self._get_outgoing_edges(doc=node):
+                            if d <= visited_edges.get(edge, depth):
+                                # Record that we'll query this edge at the
+                                # given depth, so we don't fetch it again
+                                # (unless we find it an earlier depth)
+                                visited_edges[edge] = d
+                                _outgoing_edges.add(edge)
+        return _outgoing_edges
+
+    def _get_metadata_filter(
+        self,
+        metadata: dict[str, Any] | None = None,
+        outgoing_edge: Edge | None = None,
+    ) -> dict[str, Any]:
+        """Builds a metadata filter to search for document
+
+        Args:
+            metadata: Any metadata that should be used for hybrid search
+            outgoing_edge: An optional outgoing edge to add to the search
+
+        Returns:
+            The document metadata ready for insertion into the database
+        """
+        if outgoing_edge is None:
+            return metadata or {}
+
+        metadata_filter = {} if metadata is None else metadata.copy()
+        metadata_filter[outgoing_edge.key] = outgoing_edge.value
+        return metadata_filter
