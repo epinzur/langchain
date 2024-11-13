@@ -302,7 +302,7 @@ class TestCassandraGraphIndex:
             depth=0,
             k=2,
         )
-        docs = retriever.invoke(input="[2, 10]")
+        docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
         ss_labels = [doc.metadata["label"] for doc in docs]
         assert ss_labels == ["AR", "A0"]
         assert_document_format(docs[0])
@@ -313,7 +313,7 @@ class TestCassandraGraphIndex:
             depth=2,
             k=2,
         )
-        docs = retriever.invoke(input="[2, 10]")
+        docs = retriever.invoke(input="[2, 10]", depth=2, k=2)
         # this is a set, as some of the internals of trav.search are set-driven
         # so ordering is not deterministic:
         ts_labels = {doc.metadata["label"] for doc in docs}
@@ -331,7 +331,7 @@ class TestCassandraGraphIndex:
             depth=0,
             k=2,
         )
-        docs = await retriever.ainvoke(input="[2, 10]")
+        docs = await retriever.ainvoke(input="[2, 10]", depth=0, k=2)
         ss_labels = [doc.metadata["label"] for doc in docs]
         assert ss_labels == ["AR", "A0"]
         assert_document_format(docs[0])
@@ -342,7 +342,7 @@ class TestCassandraGraphIndex:
             depth=2,
             k=2,
         )
-        docs = await retriever.ainvoke(input="[2, 10]")
+        docs = await retriever.ainvoke(input="[2, 10]", depth=2, k=2)
         ss_labels = {doc.metadata["label"] for doc in docs}
         assert ss_labels == {"AR", "A0", "BR", "B0", "TR", "T0"}
         assert_document_format(docs[0])
