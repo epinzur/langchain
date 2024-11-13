@@ -5,19 +5,25 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import (
     TYPE_CHECKING,
     Any,
+    Iterable,
     List,
     Optional,
     Sequence,
     Tuple,
     Type,
     TypeVar,
+    Union,
 )
+
+from pydantic import Field, PrivateAttr
 
 from langchain_core._api import beta
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_core.indexing import DocumentIndex, UpsertResponse
 from langchain_core.indexing.base import DeleteResponse
 from langchain_community.utilities.cassandra import SetupMode
@@ -26,7 +32,7 @@ from langchain_community.vectorstores.cassandra import Cassandra as CassandraVec
 
 if TYPE_CHECKING:
     from cassandra.cluster import Session
-    from langchain_core.embeddings import Embeddings
+
 
     from langchain_core.callbacks.manager import (
         CallbackManagerForRetrieverRun,
@@ -37,18 +43,31 @@ logger = logging.getLogger(__name__)
 
 
 class CassandraGraphIndex(DocumentIndex):
+    search_type: str
+    search_kwargs: dict[str, Any]
+    edges: Iterable[Union[str, Tuple[str, str]]]
+    k: int
+    _vector_store: CassandraVectorStore = PrivateAttr()
+
 
     def __init__(
         self,
+        search_type: str,
+        search_kwargs: dict[str, Any],
+        edges: Iterable[Union[str, Tuple[str, str]]],
+        k: int,
         embedding: Embeddings,
-        session: Session | None = None,
-        keyspace: str | None = None,
+        session: Optional[Session] = None,
+        keyspace: Optional[str] = None,
         table_name: str = "",
-        ttl_seconds: int | None = None,
+        ttl_seconds: Optional[int] = None,
         *,
+        body_index_options: Optional[List[Tuple[str, Any]]] = None,
         setup_mode: SetupMode = SetupMode.SYNC,
-        metadata_deny_list: Optional[list[str]] = None,
+        metadata_indexing: Union[Tuple[str, Iterable[str]], str] = "all",
+        **kwargs: Any,
     ) -> None:
+        # TODO: The example needs updating
         """Apache Cassandra(R) for graph-index workloads.
 
         To use it, you need a recent installation of the `cassio` library
@@ -64,7 +83,7 @@ class CassandraGraphIndex(DocumentIndex):
                     embeddings = OpenAIEmbeddings()
                     session = ...             # create your Cassandra session object
                     keyspace = 'my_keyspace'  # the keyspace should exist already
-                    table_name = 'my_graph_vector_store'
+                    table_name = 'my_graph_index'
                     index = CassandraGraphIndex(
                         embeddings,
                         session,
@@ -79,28 +98,49 @@ class CassandraGraphIndex(DocumentIndex):
             keyspace: Cassandra keyspace. If not provided, it is resolved from cassio.
             table_name: Cassandra table (required).
             ttl_seconds: Optional time-to-live for the added texts.
+            body_index_options: Optional options used to create the body index.
+                Eg. body_index_options = [cassio.table.cql.STANDARD_ANALYZER]
             setup_mode: mode used to create the Cassandra table (SYNC,
                 ASYNC or OFF).
-            metadata_deny_list: Optional list of metadata keys to not index.
+            metadata_indexing: Optional specification of a metadata indexing policy,
                 i.e. to fine-tune which of the metadata fields are indexed.
+                It can be a string ("all" or "none"), or a 2-tuple. The following
+                means that all fields except 'f1', 'f2' ... are NOT indexed:
+                    metadata_indexing=("allowlist", ["f1", "f2", ...])
+                The following means all fields EXCEPT 'g1', 'g2', ... are indexed:
+                    metadata_indexing("denylist", ["g1", "g2", ...])
+                The default is to index every metadata field.
                 Note: if you plan to have massive unique text metadata entries,
                 consider not indexing them for performance
                 (and to overcome max-length limitations).
-                Note: the `metadata_indexing` parameter from
-                langchain_community.utilities.cassandra.Cassandra is not
-                exposed since CassandraGraphVectorStore only supports the
-                deny_list option.
         """
+        super().__init__(search_type=search_type, search_kwargs=search_kwargs, edges=edges, k=k, **kwargs)
 
-        self.vector_store=CassandraVectorStore(
+        self._vector_store = CassandraVectorStore(
             embedding=embedding,
             session=session,
             keyspace=keyspace,
             table_name=table_name,
             ttl_seconds=ttl_seconds,
+            body_index_options=body_index_options,
             setup_mode=setup_mode,
-            metadata_indexing=("deny_list", metadata_deny_list),
+            metadata_indexing=metadata_indexing,
+            **kwargs,
         )
+
+
+
+
+    def __post_init__(self):
+        try:
+            from cassandra.cluster import Session
+        except (ImportError, ModuleNotFoundError):
+            raise ImportError(
+                "Could not import cassio python package. "
+                "Please install it with `pip install cassio`."
+            )
+
+        # Assuming embedding and other attributes are initialized as class-level fields or injected post-init
 
 
 
@@ -124,6 +164,12 @@ class CassandraGraphIndex(DocumentIndex):
             successfully added or updated in the vectorstore and the list of IDs that
             failed to be added or updated.
         """
+        for item in items:
+            if item.id is None:
+                item.id = secrets.token_hex(8)
+        ids = self._vector_store.add_documents(documents=items)
+        return UpsertResponse(succeeded=ids)
+
 
     def delete(self, ids: Optional[list[str]] = None, **kwargs: Any) -> DeleteResponse:
         """Delete by IDs or other criteria.
@@ -140,6 +186,14 @@ class CassandraGraphIndex(DocumentIndex):
             DeleteResponse: A response object that contains the list of IDs that were
             successfully deleted and the list of IDs that failed to be deleted.
         """
+        result = self._vector_store.delete(ids=ids)
+        return DeleteResponse(
+            succeeded=ids if result else [],
+            num_deleted=len(ids) if result else 0,
+            failed=ids if not result else [],
+            num_failed=len(ids) if not result else 0,
+        )
+
 
     def get(
         self,
@@ -166,6 +220,11 @@ class CassandraGraphIndex(DocumentIndex):
         Returns:
             List[Document]: List of documents that were found.
         """
+        docs = [
+            self._vector_store.get_by_document_id(document_id=id)
+            for id in ids
+        ]
+        return [doc for doc in docs if doc is not None]
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
@@ -178,3 +237,7 @@ class CassandraGraphIndex(DocumentIndex):
         Returns:
             List of relevant documents.
         """
+
+
+
+CassandraGraphIndex.model_rebuild()

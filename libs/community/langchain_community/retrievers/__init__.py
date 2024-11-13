@@ -85,6 +85,9 @@ if TYPE_CHECKING:
     from langchain_community.retrievers.knn import (
         KNNRetriever,
     )
+    from langchain_community.retrievers.graph_traversal import (
+        GraphTraversalRetriever,
+    )
     from langchain_community.retrievers.llama_index import (
         LlamaIndexGraphRetriever,
         LlamaIndexRetriever,
@@ -170,6 +173,7 @@ _module_lookup = {
     "GoogleDocumentAIWarehouseRetriever": "langchain_community.retrievers.google_cloud_documentai_warehouse",  # noqa: E501
     "GoogleVertexAIMultiTurnSearchRetriever": "langchain_community.retrievers.google_vertex_ai_search",  # noqa: E501
     "GoogleVertexAISearchRetriever": "langchain_community.retrievers.google_vertex_ai_search",  # noqa: E501
+    "GraphTraversalRetriever": "langchain_community.retrievers.graph_traversal",
     "KNNRetriever": "langchain_community.retrievers.knn",
     "KayAiRetriever": "langchain_community.retrievers.kay",
     "LlamaIndexGraphRetriever": "langchain_community.retrievers.llama_index",
@@ -227,6 +231,7 @@ __all__ = [
     "GoogleDocumentAIWarehouseRetriever",
     "GoogleVertexAIMultiTurnSearchRetriever",
     "GoogleVertexAISearchRetriever",
+    "GraphTraversalRetriever",
     "KayAiRetriever",
     "KNNRetriever",
     "LlamaIndexGraphRetriever",
