@@ -76,6 +76,9 @@ if TYPE_CHECKING:
         GoogleVertexAIMultiTurnSearchRetriever,
         GoogleVertexAISearchRetriever,
     )
+    from langchain_community.retrievers.graph_traversal import (
+        GraphTraversalRetriever,
+    )
     from langchain_community.retrievers.kay import (
         KayAiRetriever,
     )
@@ -84,9 +87,6 @@ if TYPE_CHECKING:
     )
     from langchain_community.retrievers.knn import (
         KNNRetriever,
-    )
-    from langchain_community.retrievers.graph_traversal import (
-        GraphTraversalRetriever,
     )
     from langchain_community.retrievers.llama_index import (
         LlamaIndexGraphRetriever,
@@ -161,7 +161,7 @@ _module_lookup = {
     "AzureCognitiveSearchRetriever": "langchain_community.retrievers.azure_ai_search",
     "BM25Retriever": "langchain_community.retrievers.bm25",
     "BreebsRetriever": "langchain_community.retrievers.breebs",
-    "CassandraGraphIndex" : "langchain_community.retrievers.cassandra_graph_index",
+    "CassandraGraphIndex": "langchain_community.retrievers.cassandra_graph_index",
     "ChaindeskRetriever": "langchain_community.retrievers.chaindesk",
     "ChatGPTPluginRetriever": "langchain_community.retrievers.chatgpt_plugin_retriever",
     "CohereRagRetriever": "langchain_community.retrievers.cohere_rag_retriever",

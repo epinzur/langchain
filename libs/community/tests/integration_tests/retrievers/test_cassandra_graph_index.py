@@ -1,7 +1,7 @@
 """Test of Apache Cassandra graph index class `CassandraGraphIndex`"""
 
-import os
 import json
+import os
 import random
 from contextlib import contextmanager
 from typing import Any, Generator, Iterable, List, Optional
@@ -152,6 +152,7 @@ def graph_vector_store_docs() -> list[Document]:
         # add_links(doc_f, Link.outgoing(kind="af_example", tag=f"tag_{suffix}"))
     return docs_a + docs_b + docs_f + docs_t
 
+
 @contextmanager
 def get_cassandra_session(
     table_name: str, drop: bool = True
@@ -197,7 +198,7 @@ def graph_index_angular_mmr(
     with get_cassandra_session(table_name=table_name) as session:
         yield CassandraGraphIndex(
             search_type="mmr",
-            search_kwargs={"fetch_k":2},
+            search_kwargs={"fetch_k": 2},
             edges=[("outgoing", "incoming")],
             k=2,
             embedding=AngularTwoDimensionalEmbeddings(),
@@ -251,9 +252,9 @@ def graph_index_d2_mmr(
             search_type="mmr",
             search_kwargs={
                 "depth": 2,
-                "fetch_k":1,
-                "adjacent_k":2,
-                "lambda_mult":0.1,
+                "fetch_k": 1,
+                "adjacent_k": 2,
+                "lambda_mult": 0.1,
             },
             edges=[("out", "in"), "tag"],
             k=2,
@@ -262,6 +263,7 @@ def graph_index_d2_mmr(
             keyspace=TEST_KEYSPACE,
             table_name=session.table_name,
         )
+
 
 @pytest.fixture(scope="function")
 def graph_index_d2_traversal_depth_0(
@@ -280,6 +282,7 @@ def graph_index_d2_traversal_depth_0(
             table_name=session.table_name,
         )
 
+
 @pytest.fixture(scope="function")
 def graph_index_d2_traversal_depth_2(
     embedding_d2: Embeddings,
@@ -296,6 +299,7 @@ def graph_index_d2_traversal_depth_2(
             keyspace=TEST_KEYSPACE,
             table_name=session.table_name,
         )
+
 
 def test_mmr_traversal(graph_index_angular_mmr: CassandraGraphIndex) -> None:
     """ Test end to end construction and MMR search.
@@ -363,19 +367,13 @@ def test_write_retrieve_keywords(
     node1 = Document(
         id="doc1",
         page_content="Hello World",
-        metadata={
-            "outgoing": "parent",
-            "keywords": ["greeting", "world"]
-        },
+        metadata={"outgoing": "parent", "keywords": ["greeting", "world"]},
     )
 
     node2 = Document(
         id="doc2",
         page_content="Hello Earth",
-        metadata={
-            "outgoing": "parent",
-            "keywords": ["greeting", "earth"]
-        },
+        metadata={"outgoing": "parent", "keywords": ["greeting", "earth"]},
     )
 
     g_index = graph_index_earth_traversal
@@ -409,11 +407,7 @@ def test_metadata(graph_index_fake_traversal: CassandraGraphIndex) -> None:
     doc_a = Document(
         id="a",
         page_content="A",
-        metadata={
-            "other": "some other field",
-            "in-link": "http://a",
-            "tags": ["foo"]
-        },
+        metadata={"other": "some other field", "in-link": "http://a", "tags": ["foo"]},
     )
 
     g_index = graph_index_fake_traversal
@@ -580,7 +574,7 @@ class TestCassandraGraphIndex:
         g_index.upsert(graph_vector_store_docs)
         docs = g_index.get(["FL"])
         assert len(docs) == 1
-        doc:Document = docs[0]
+        doc: Document = docs[0]
         assert doc.page_content == "[1, -9]"
         assert doc.metadata["out"] == "af_l"
         # links = doc.metadata["links"]

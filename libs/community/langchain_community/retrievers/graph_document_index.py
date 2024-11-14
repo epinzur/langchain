@@ -1,22 +1,31 @@
 import asyncio
-from typing import Any, Dict, Iterable, Iterator, List, Literal, Tuple, Union, cast, override
+from abc import abstractmethod
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Literal,
+    Tuple,
+    Union,
+    cast,
+    override,
+)
 
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
 )
-
 from langchain_core.documents import Document
 from langchain_core.indexing import DocumentIndex
 from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
-
 from pydantic import BaseModel, PrivateAttr
 
-from abc import abstractmethod
 
-class Edge():
-    direction: str = Literal['bi-dir', 'in', 'out']
+class Edge:
+    direction: str = Literal["bi-dir", "in", "out"]
     key: str
     value: Any
 
@@ -27,6 +36,7 @@ class Edge():
 
     def __str__(self):
         return f"{self.direction}:{self.key}:{self.value}"
+
 
 class GraphVectorStore(VectorStore):
     use_metadata_expansion: bool = False
