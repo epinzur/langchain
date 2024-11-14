@@ -188,7 +188,6 @@ class GraphTraversalRetriever(BaseRetriever):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        print("POST INIT")
         for edge in self.edges:
             if isinstance(edge, str):
                 self._edge_lookup[edge] = edge
@@ -438,10 +437,7 @@ class GraphTraversalRetriever(BaseRetriever):
         # depth. These are edges that are either new, or newly discovered at a
         # lower depth.
         _outgoing_edges: set[Edge] = set()
-        print(f"\nLooking at Nodes:")
         for node in nodes:
-            print(f"\t{node}")
-
             if node.id is not None:
                 # If this document node is at a closer depth, update visited_ids
                 if d <= visited_ids.get(node.id, depth):
@@ -452,16 +448,12 @@ class GraphTraversalRetriever(BaseRetriever):
                         # edges to the set to traverse.
                         edges = self._get_outgoing_edges(doc=node)
                         for edge in self._get_outgoing_edges(doc=node):
-                            print(f"\tConsidering edge: {edge}")
                             if d <= visited_edges.get(edge, depth):
                                 # Record that we'll query this edge at the
                                 # given depth, so we don't fetch it again
                                 # (unless we find it an earlier depth)
                                 visited_edges[edge] = d
                                 _outgoing_edges.add(edge)
-        print("\nOutgoing Edges:")
-        for edge in _outgoing_edges:
-            print(f"\t{edge}")
         return _outgoing_edges
 
     def _get_metadata_filter(
@@ -478,8 +470,6 @@ class GraphTraversalRetriever(BaseRetriever):
         Returns:
             The document metadata ready for insertion into the database
         """
-        print(f"Building metadata filter for edge: {outgoing_edge}")
-
         if outgoing_edge is None:
             return metadata or {}
 
@@ -490,5 +480,4 @@ class GraphTraversalRetriever(BaseRetriever):
             in_key = self._edge_lookup[outgoing_edge.key]
             metadata_filter[in_key] = outgoing_edge.value
 
-        print(f"\t got: {metadata_filter}")
         return metadata_filter
