@@ -1,5 +1,3 @@
-
-
 """Apache Cassandra DB graph document index implementation."""
 
 from __future__ import annotations
@@ -19,21 +17,18 @@ from typing import (
     Union,
 )
 
-from pydantic import Field, PrivateAttr
-
 from langchain_core._api import beta
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.indexing import DocumentIndex, UpsertResponse
 from langchain_core.indexing.base import DeleteResponse
+from pydantic import Field, PrivateAttr
+
 from langchain_community.utilities.cassandra import SetupMode
 from langchain_community.vectorstores.cassandra import Cassandra as CassandraVectorStore
 
-
 if TYPE_CHECKING:
     from cassandra.cluster import Session
-
-
     from langchain_core.callbacks.manager import (
         CallbackManagerForRetrieverRun,
     )
@@ -48,7 +43,6 @@ class CassandraGraphIndex(DocumentIndex):
     edges: Iterable[Union[str, Tuple[str, str]]]
     k: int
     _vector_store: CassandraVectorStore = PrivateAttr()
-
 
     def __init__(
         self,
@@ -114,7 +108,13 @@ class CassandraGraphIndex(DocumentIndex):
                 consider not indexing them for performance
                 (and to overcome max-length limitations).
         """
-        super().__init__(search_type=search_type, search_kwargs=search_kwargs, edges=edges, k=k, **kwargs)
+        super().__init__(
+            search_type=search_type,
+            search_kwargs=search_kwargs,
+            edges=edges,
+            k=k,
+            **kwargs,
+        )
 
         self._vector_store = CassandraVectorStore(
             embedding=embedding,
@@ -128,9 +128,6 @@ class CassandraGraphIndex(DocumentIndex):
             **kwargs,
         )
 
-
-
-
     def __post_init__(self):
         try:
             from cassandra.cluster import Session
@@ -141,8 +138,6 @@ class CassandraGraphIndex(DocumentIndex):
             )
 
         # Assuming embedding and other attributes are initialized as class-level fields or injected post-init
-
-
 
     def upsert(self, items: Sequence[Document], /, **kwargs: Any) -> UpsertResponse:
         """Upsert documents into the index.
@@ -170,7 +165,6 @@ class CassandraGraphIndex(DocumentIndex):
         ids = self._vector_store.add_documents(documents=items)
         return UpsertResponse(succeeded=ids)
 
-
     def delete(self, ids: Optional[list[str]] = None, **kwargs: Any) -> DeleteResponse:
         """Delete by IDs or other criteria.
 
@@ -193,7 +187,6 @@ class CassandraGraphIndex(DocumentIndex):
             failed=ids if not result else [],
             num_failed=len(ids) if not result else 0,
         )
-
 
     def get(
         self,
@@ -220,10 +213,7 @@ class CassandraGraphIndex(DocumentIndex):
         Returns:
             List[Document]: List of documents that were found.
         """
-        docs = [
-            self._vector_store.get_by_document_id(document_id=id)
-            for id in ids
-        ]
+        docs = [self._vector_store.get_by_document_id(document_id=id) for id in ids]
         return [doc for doc in docs if doc is not None]
 
     def _get_relevant_documents(
@@ -237,7 +227,6 @@ class CassandraGraphIndex(DocumentIndex):
         Returns:
             List of relevant documents.
         """
-
 
 
 CassandraGraphIndex.model_rebuild()

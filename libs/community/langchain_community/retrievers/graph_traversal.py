@@ -1,22 +1,23 @@
 import asyncio
-from typing import Any, Dict, Iterable, Iterator, List, Literal, Tuple, Union, cast
+from abc import abstractmethod
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
 
+from langchain_chroma import Chroma
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
 )
-
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
+from pydantic import PrivateAttr
 
-from pydantic import BaseModel, PrivateAttr
+from langchain_community.vectorstores import OpenSearchVectorSearch
 
-from abc import abstractmethod
 
-class Edge():
-    direction: str = Literal['bi-dir', 'in', 'out']
+class Edge:
+    direction: str = Literal["bi-dir", "in", "out"]
     key: str
     value: Any
 
@@ -27,6 +28,19 @@ class Edge():
 
     def __str__(self):
         return f"{self.direction}:{self.key}:{self.value}"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Edge):
+            return NotImplemented
+        return (
+            self.direction == other.direction
+            and self.key == other.key
+            and self.value == other.value
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.direction, self.key, self.value))
+
 
 class GraphVectorStore(VectorStore):
     @abstractmethod
@@ -55,6 +69,93 @@ class GraphVectorStore(VectorStore):
         """
         return await run_in_executor(None, self.metadata_search, filter, n)
 
+
+class ChromaWrapper(GraphVectorStore):
+    def __init__(self, vector_store: Chroma):
+        self._vector_store = vector_store
+
+    def metadata_search(
+        self,
+        filter: dict[str, Any] | None = None,  # noqa: A002
+        n: int = 5,
+    ) -> Iterable[Document]:
+        results = self._vector_store.get(where=filter, limit=n)
+        return [
+            Document(page_content=result[0], metadata=result[1] or {}, id=result[2])
+            for result in zip(
+                results["documents"],
+                results["metadatas"],
+                results["ids"],
+            )
+        ]
+
+    @classmethod
+    def from_texts(self, *args: Any) -> Chroma:
+        return Chroma.from_texts(*args)
+
+    def similarity_search(self, *args: Any) -> List[Document]:
+        return self._vector_store.similarity_search(*args)
+
+    def __getattr__(self, name: str) -> Any:
+        # Delegate attribute access to the underlying vector store
+        return getattr(self._vector_store, name)
+
+
+class OpenSearchWrapper(GraphVectorStore):
+    def __init__(self, vector_store: OpenSearchVectorSearch):
+        self._vector_store = vector_store
+
+    def _hit_to_document(self, hit: Any) -> Document:
+        return Document(
+            page_content=hit["_source"]["text"],
+            metadata=hit["_source"]["metadata"],
+            id=hit["_id"],
+        )
+
+    def _build_filter(
+        self, filter: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]] | None:
+        if filter is None:
+            return None
+        return [
+            {
+                "terms" if isinstance(value, list) else "term": {
+                    f"metadata.{key}.keyword": value
+                }
+            }
+            for key, value in filter.items()
+        ]
+
+    def metadata_search(
+        self,
+        filter: dict[str, Any] | None = None,  # noqa: A002
+        n: int = 5,
+    ) -> Iterable[Document]:
+        body = {
+            "_source": ["text", "metadata"],
+            "query": {"bool": {"must": self._build_filter(filter=filter)}},
+            "size": n,
+        }
+
+        results = self._vector_store.client.search(
+            index=self._vector_store.index_name,
+            body=body,
+        )
+
+        return [self._hit_to_document(hit) for hit in results["hits"]["hits"]]
+
+    @classmethod
+    def from_texts(self, *args: Any) -> OpenSearchVectorSearch:
+        return OpenSearchVectorSearch.from_texts(*args)
+
+    def similarity_search(self, *args: Any) -> List[Document]:
+        return self._vector_store.similarity_search(*args)
+
+    def __getattr__(self, name: str) -> Any:
+        # Delegate attribute access to the underlying vector store
+        return getattr(self._vector_store, name)
+
+
 class DocumentCache:
     documents: dict[str, Document] = {}
 
@@ -79,6 +180,7 @@ class DocumentCache:
                 raise RuntimeError(msg)
         return docs
 
+
 class GraphTraversalRetriever(BaseRetriever):
     vector_store: VectorStore
     edges: List[Union[str, Tuple[str, str]]]
@@ -90,18 +192,30 @@ class GraphTraversalRetriever(BaseRetriever):
         for edge in self.edges:
             if isinstance(edge, str):
                 self._edge_lookup[edge] = edge
-            elif isinstance(edge, tuple) and len(edge) == 2 and all(isinstance(item, str) for item in edge):
+            elif (
+                isinstance(edge, tuple)
+                and len(edge) == 2
+                and all(isinstance(item, str) for item in edge)
+            ):
                 self._edge_lookup[edge[0]] = edge[1]
             else:
-                raise ValueError("Invalid type for edge. must be 'str' or 'tuple[str,str]'")
-
+                raise ValueError(
+                    "Invalid type for edge. must be 'str' or 'tuple[str,str]'"
+                )
 
     @property
     def _graph_vector_store(self) -> GraphVectorStore:
+        if isinstance(self.vector_store, Chroma):
+            return ChromaWrapper(vector_store=self.vector_store)
+        elif isinstance(self.vector_store, OpenSearchVectorSearch):
+            return OpenSearchWrapper(vector_store=self.vector_store)
         return cast(GraphVectorStore, self.vector_store)
 
     def _get_relevant_documents(
-        self, query: str, *, run_manager: CallbackManagerForRetrieverRun,
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun,
         k: int = 4,
         depth: int = 1,
         filter: dict[str, Any] | None = None,
@@ -154,7 +268,11 @@ class GraphTraversalRetriever(BaseRetriever):
                         outgoing_edge=outgoing_edge,
                     )
 
-                    docs = list(self._graph_vector_store.metadata_search(filter=metadata_filter, n=1000))
+                    docs = list(
+                        self._graph_vector_store.metadata_search(
+                            filter=metadata_filter, n=1000
+                        )
+                    )
                     doc_cache.add_documents(docs)
 
                     new_ids_at_next_depth: set[str] = set()
@@ -180,9 +298,11 @@ class GraphTraversalRetriever(BaseRetriever):
 
         return doc_cache.get_by_document_ids(doc_ids=visited_ids)
 
-
     async def _aget_relevant_documents(
-        self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun,
+        self,
+        query: str,
+        *,
+        run_manager: AsyncCallbackManagerForRetrieverRun,
         k: int = 4,
         depth: int = 1,
         filter: dict[str, Any] | None = None,
@@ -269,25 +389,41 @@ class GraphTraversalRetriever(BaseRetriever):
 
         return doc_cache.get_by_document_ids(doc_ids=visited_ids)
 
-    def _get_edges(self, direction:str, key: str, value: Any) -> set[Edge]:
+    def _get_edges(self, direction: str, key: str, value: Any) -> set[Edge]:
         if isinstance(value, str):
-            return { Edge(direction=direction, key=key, value=value) }
+            return {Edge(direction=direction, key=key, value=value)}
         elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
             return {Edge(direction=direction, key=key, value=item) for item in value}
         else:
-            raise TypeError("Expected a string or an iterable of strings, but got an unsupported type.")
+            raise TypeError(
+                "Expected a string or an iterable of strings, but got an unsupported type."
+            )
 
     def _get_outgoing_edges(self, doc: Document) -> set[Edge]:
         outgoing_edges = set()
         for edge in self.edges:
             if isinstance(edge, str):
                 if edge in doc.metadata:
-                    outgoing_edges.update(self._get_edges(direction="bi-dir", key=edge, value=doc.metadata[edge]))
-            elif isinstance(edge, tuple) and len(edge) == 2 and all(isinstance(item, str) for item in edge):
+                    outgoing_edges.update(
+                        self._get_edges(
+                            direction="bi-dir", key=edge, value=doc.metadata[edge]
+                        )
+                    )
+            elif (
+                isinstance(edge, tuple)
+                and len(edge) == 2
+                and all(isinstance(item, str) for item in edge)
+            ):
                 if edge[0] in doc.metadata:
-                    outgoing_edges.update(self._get_edges(direction="out", key=edge[0], value=doc.metadata[edge[0]]))
+                    outgoing_edges.update(
+                        self._get_edges(
+                            direction="out", key=edge[0], value=doc.metadata[edge[0]]
+                        )
+                    )
             else:
-                raise ValueError("Invalid type for edge. must be 'str' or 'tuple[str,str]'")
+                raise ValueError(
+                    "Invalid type for edge. must be 'str' or 'tuple[str,str]'"
+                )
         return outgoing_edges
 
     def _gather_outgoing_edges(
@@ -304,7 +440,7 @@ class GraphTraversalRetriever(BaseRetriever):
         _outgoing_edges: set[Edge] = set()
         print(f"\nLooking at Nodes:")
         for node in nodes:
-            print(f'\t{node}')
+            print(f"\t{node}")
 
             if node.id is not None:
                 # If this document node is at a closer depth, update visited_ids
@@ -342,15 +478,17 @@ class GraphTraversalRetriever(BaseRetriever):
         Returns:
             The document metadata ready for insertion into the database
         """
+        print(f"Building metadata filter for edge: {outgoing_edge}")
+
         if outgoing_edge is None:
             return metadata or {}
 
         metadata_filter = {} if metadata is None else metadata.copy()
-        if outgoing_edge.direction == "bidir":
+        if outgoing_edge.direction == "bi-dir":
             metadata_filter[outgoing_edge.key] = outgoing_edge.value
         elif outgoing_edge.direction == "out":
-            print(f"self._edge_lookup:{self._edge_lookup}")
             in_key = self._edge_lookup[outgoing_edge.key]
             metadata_filter[in_key] = outgoing_edge.value
 
+        print(f"\t got: {metadata_filter}")
         return metadata_filter

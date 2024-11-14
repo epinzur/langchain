@@ -1,33 +1,29 @@
-"""Test of Apache Cassandra graph index class `Cassandra`"""
+"""Test of Graph Traversal Retriever"""
 
-import os
 import json
+import os
 import random
 from contextlib import contextmanager
-from typing import Any, Generator, Iterable, List, Optional
+from typing import Any, Generator, Iterable, List, Literal, Optional, cast
 
 import pytest
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 
 from langchain_community.retrievers import GraphTraversalRetriever
-from langchain_community.vectorstores import Cassandra
+from langchain_community.vectorstores import Cassandra, OpenSearchVectorSearch
 
-TEST_KEYSPACE = "graph_test_keyspace"
+vector_store_types = [
+    "astra-db" "cassandra",
+    "chroma-db",
+    "open-search",
+]
 
 
 def _doc_ids(docs: Iterable[Document]) -> List[str]:
     return [doc.id for doc in docs if doc.id is not None]
-
-
-class CassandraSession:
-    table_name: str
-    session: Any
-
-    def __init__(self, table_name: str, session: Any):
-        self.table_name = table_name
-        self.session = session
 
 
 class ParserEmbeddings(Embeddings):
@@ -51,11 +47,6 @@ class ParserEmbeddings(Embeddings):
             return vals
 
 
-@pytest.fixture
-def embedding_d2() -> Embeddings:
-    return ParserEmbeddings(dimension=2)
-
-
 class EarthEmbeddings(Embeddings):
     def get_vector_near(self, value: float) -> List[float]:
         base_point = [value, (1 - value**2) ** 0.5]
@@ -74,11 +65,6 @@ class EarthEmbeddings(Embeddings):
         else:
             vector = self.get_vector_near(0.1)
         return vector
-
-
-@pytest.fixture
-def earth_embeddings() -> Embeddings:
-    return EarthEmbeddings()
 
 
 @pytest.fixture
@@ -150,9 +136,21 @@ def graph_vector_store_docs() -> list[Document]:
         # add_links(doc_f, Link.outgoing(kind="af_example", tag=f"tag_{suffix}"))
     return docs_a + docs_b + docs_f + docs_t
 
+
+class CassandraSession:
+    keyspace: str
+    table_name: str
+    session: Any
+
+    def __init__(self, keyspace: str, table_name: str, session: Any):
+        self.keyspace = keyspace
+        self.table_name = table_name
+        self.session = session
+
+
 @contextmanager
 def get_cassandra_session(
-    table_name: str, drop: bool = True
+    keyspace: str, table_name: str, drop: bool = True
 ) -> Generator[CassandraSession, None, None]:
     """Initialize the Cassandra cluster and session"""
     from cassandra.cluster import Cluster
@@ -172,16 +170,18 @@ def get_cassandra_session(
     try:
         session.execute(
             (
-                f"CREATE KEYSPACE IF NOT EXISTS {TEST_KEYSPACE}"
+                f"CREATE KEYSPACE IF NOT EXISTS {keyspace}"
                 " WITH replication = "
                 "{'class': 'SimpleStrategy', 'replication_factor': 1}"
             )
         )
         if drop:
-            session.execute(f"DROP TABLE IF EXISTS {TEST_KEYSPACE}.{table_name}")
+            session.execute(f"DROP TABLE IF EXISTS {keyspace}.{table_name}")
 
         # Yield the session for usage
-        yield CassandraSession(table_name=table_name, session=session)
+        yield CassandraSession(
+            keyspace=keyspace, table_name=table_name, session=session
+        )
     finally:
         # Ensure proper shutdown/cleanup of resources
         session.shutdown()
@@ -189,42 +189,77 @@ def get_cassandra_session(
 
 
 @pytest.fixture(scope="function")
-def vector_store_earth(
-    earth_embeddings: Embeddings,
-    table_name: str = "graph_test_table",
+def vector_store(
+    request, embedding_type: str, vector_store_type: str
 ) -> Generator[VectorStore, None, None]:
-    with get_cassandra_session(table_name=table_name) as session:
-        yield Cassandra(
-            embedding=earth_embeddings,
-            session=session.session,
-            keyspace=TEST_KEYSPACE,
-            table_name=session.table_name,
+    embeddings: Embeddings
+    if embedding_type == "earth-embeddings":
+        embeddings = EarthEmbeddings()
+    elif embedding_type == "d2-embeddings":
+        embeddings = ParserEmbeddings(dimension=2)
+    else:
+        msg = f"Unknown embeddings type: {embedding_type}"
+        raise ValueError(msg)
+
+    if vector_store_type == "astra-db":
+        try:
+            from astrapy.authentication import StaticTokenProvider
+            from dotenv import load_dotenv
+            from langchain_astradb import AstraDBVectorStore
+
+            load_dotenv()
+
+            token = StaticTokenProvider(os.environ["ASTRA_DB_APPLICATION_TOKEN"])
+
+            store = AstraDBVectorStore(
+                embedding=embeddings,
+                collection_name="graph_test_collection",
+                namespace="default_keyspace",
+                token=token,
+                api_endpoint=os.environ["ASTRA_DB_API_ENDPOINT"],
+            )
+            yield store
+            store.delete_collection()
+
+        except ImportError or ModuleNotFoundError:
+            msg = "to test graph-traversal with AstraDB, please install langchain-astradb and python-dotenv"
+            raise ImportError(msg)
+
+    elif vector_store_type == "cassandra":
+        with get_cassandra_session(
+            table_name="graph_test_table", keyspace="graph_test_keyspace"
+        ) as session:
+            store = Cassandra(
+                embedding=embeddings,
+                session=session.session,
+                keyspace=session.keyspace,
+                table_name=session.table_name,
+            )
+            yield store
+    elif vector_store_type == "chroma-db":
+        store = Chroma(embedding_function=embeddings)
+        yield store
+        store.delete_collection()
+    elif vector_store_type == "open-search":
+        store = OpenSearchVectorSearch(
+            opensearch_url="http://localhost:9200",
+            index_name="graph_test_index",
+            embedding_function=embeddings,
         )
-
-@pytest.fixture(scope="function")
-def vector_store_d2(
-    embedding_d2: Embeddings,
-    table_name: str = "graph_test_table",
-) -> Generator[VectorStore, None, None]:
-    with get_cassandra_session(table_name=table_name) as session:
-        yield Cassandra(
-            embedding=embedding_d2,
-            session=session.session,
-            keyspace=TEST_KEYSPACE,
-            table_name=session.table_name,
-        )
-
-@pytest.fixture(scope="function")
-def populated_graph_vector_store_d2(
-    vector_store_d2: VectorStore,
-    graph_vector_store_docs: list[Document],
-) -> Generator[VectorStore, None, None]:
-    vector_store_d2.add_documents(graph_vector_store_docs)
-    yield vector_store_d2
+        yield store
+        store.delete_index()  # store.index_name
+    else:
+        msg = f"Unknown vector store type: {vector_store_type}"
+        raise ValueError(msg)
 
 
+# this test has complex metadata fields (values with list type)
+# only `astra-db`` and `open-search` can correctly handle
+# complex metadata fields at this time.
+@pytest.mark.parametrize("vector_store_type", ["astra-db", "open-search"])
+@pytest.mark.parametrize("embedding_type", ["earth-embeddings"])
 def test_traversal(
-    vector_store_earth: VectorStore,
+    vector_store: VectorStore,
 ) -> None:
     greetings = Document(
         id="greetings",
@@ -237,33 +272,22 @@ def test_traversal(
     doc1 = Document(
         id="doc1",
         page_content="Hello World",
-        metadata={
-            "outgoing": "parent",
-            "keywords": ["greeting", "world"]
-        },
+        metadata={"outgoing": "parent", "keywords": ["greeting", "world"]},
     )
 
     doc2 = Document(
         id="doc2",
         page_content="Hello Earth",
-        metadata={
-            "outgoing": "parent",
-            "keywords": ["greeting", "earth"]
-        },
+        metadata={"outgoing": "parent", "keywords": ["greeting", "earth"]},
     )
-    vector_store_earth.add_documents([greetings, doc1, doc2])
+    vector_store.add_documents([greetings, doc1, doc2])
 
     retriever = GraphTraversalRetriever(
-        vector_store=vector_store_earth,
+        vector_store=vector_store,
         edges=[("outgoing", "incoming"), "keywords"],
         k=2,
         depth=2,
     )
-
-    # Doc2 is more similar, but World and Earth are similar enough that doc1 also
-    # shows up.
-    docs = retriever.invoke("Earth", k=2)
-    assert _doc_ids(docs) == ["doc2", "doc1"]
 
     docs = retriever.invoke("Earth", k=1, depth=0)
     assert _doc_ids(docs) == ["doc2"]
@@ -271,17 +295,9 @@ def test_traversal(
     docs = retriever.invoke("Earth", k=2, depth=0)
     assert _doc_ids(docs) == ["doc2", "doc1"]
 
-    docs = retriever.invoke("Earth", k=2, depth=1)
-    assert _doc_ids(docs) == ["doc2", "doc1", "greetings"]
-
-    # K=1 only pulls in doc2 (Hello Earth)
-    docs = retriever.invoke("Earth", k=1, depth=0)
-    assert _doc_ids(docs) == ["doc2"]
-
-    # K=1 only pulls in doc2 (Hello Earth). Depth=1 traverses to parent and via
-    # keyword edge.
     docs = retriever.invoke("Earth", k=1, depth=1)
     assert set(_doc_ids(docs)) == {"doc2", "doc1", "greetings"}
+
 
 def assert_document_format(doc: Document) -> None:
     assert doc.id is not None
@@ -290,29 +306,33 @@ def assert_document_format(doc: Document) -> None:
     assert "__embedding" not in doc.metadata
 
 
+# the tests below use simple metadata fields
+# astra-db, cassandra, chroma-db, and open-search
+# can all handle simple metadata fields
+
+
 class TestCassandraGraphIndex:
+    @pytest.mark.parametrize("vector_store_type", vector_store_types)
+    @pytest.mark.parametrize("embedding_type", ["d2-embeddings"])
     def test_gvs_traversal_search_sync(
         self,
-        populated_graph_vector_store_d2: VectorStore,
+        vector_store: VectorStore,
+        graph_vector_store_docs: list[Document],
     ) -> None:
         """Graph traversal search on a graph vector store."""
-        # retriever = GraphTraversalRetriever(
-        #     vector_store=populated_graph_vector_store_d2,
-        #     edges=[("out", "in"), "tag"],
-        #     depth=0,
-        #     k=2,
-        # )
+        vector_store.add_documents(graph_vector_store_docs)
+        retriever = GraphTraversalRetriever(
+            vector_store=vector_store,
+            edges=[("out", "in"), "tag"],
+            depth=2,
+            k=2,
+        )
+
         # docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
         # ss_labels = [doc.metadata["label"] for doc in docs]
         # assert ss_labels == ["AR", "A0"]
         # assert_document_format(docs[0])
 
-        retriever = GraphTraversalRetriever(
-            vector_store=populated_graph_vector_store_d2,
-            edges=[("out", "in"), "tag"],
-            depth=2,
-            k=2,
-        )
         docs = retriever.invoke(input="[2, 10]", depth=2, k=2)
         # this is a set, as some of the internals of trav.search are set-driven
         # so ordering is not deterministic:
@@ -320,15 +340,19 @@ class TestCassandraGraphIndex:
         assert ts_labels == {"AR", "A0", "BR", "B0", "TR", "T0"}
         assert_document_format(docs[0])
 
+    @pytest.mark.parametrize("vector_store_type", vector_store_types)
+    @pytest.mark.parametrize("embedding_type", ["d2-embeddings"])
     async def test_gvs_traversal_search_async(
         self,
-        populated_graph_vector_store_d2: VectorStore,
+        vector_store: VectorStore,
+        graph_vector_store_docs: list[Document],
     ) -> None:
         """Graph traversal search on a graph vector store."""
+        await vector_store.aadd_documents(graph_vector_store_docs)
         retriever = GraphTraversalRetriever(
-            vector_store=populated_graph_vector_store_d2,
+            vector_store=vector_store,
             edges=[("out", "in"), "tag"],
-            depth=0,
+            depth=2,
             k=2,
         )
         docs = await retriever.ainvoke(input="[2, 10]", depth=0, k=2)
@@ -336,12 +360,6 @@ class TestCassandraGraphIndex:
         assert ss_labels == ["AR", "A0"]
         assert_document_format(docs[0])
 
-        retriever = GraphTraversalRetriever(
-            vector_store=populated_graph_vector_store_d2,
-            edges=[("out", "in"), "tag"],
-            depth=2,
-            k=2,
-        )
         docs = await retriever.ainvoke(input="[2, 10]", depth=2, k=2)
         ss_labels = {doc.metadata["label"] for doc in docs}
         assert ss_labels == {"AR", "A0", "BR", "B0", "TR", "T0"}

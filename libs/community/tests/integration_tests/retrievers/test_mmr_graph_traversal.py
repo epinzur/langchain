@@ -1,7 +1,7 @@
 """Test of Apache Cassandra graph index class `Cassandra`"""
 
-import os
 import json
+import os
 from contextlib import contextmanager
 from typing import Any, Generator, Iterable, List
 
@@ -127,6 +127,7 @@ def graph_vector_store_docs() -> list[Document]:
         # add_links(doc_f, Link.outgoing(kind="af_example", tag=f"tag_{suffix}"))
     return docs_a + docs_b + docs_f + docs_t
 
+
 @contextmanager
 def get_cassandra_session(
     table_name: str, drop: bool = True
@@ -177,6 +178,7 @@ def vector_store_angular(
             table_name=session.table_name,
         )
 
+
 @pytest.fixture(scope="function")
 def vector_store_d2(
     embedding_d2: Embeddings,
@@ -190,6 +192,7 @@ def vector_store_d2(
             table_name=session.table_name,
         )
 
+
 @pytest.fixture(scope="function")
 def populated_graph_vector_store_d2(
     vector_store_d2: VectorStore,
@@ -197,6 +200,7 @@ def populated_graph_vector_store_d2(
 ) -> Generator[VectorStore, None, None]:
     vector_store_d2.add_documents(graph_vector_store_docs)
     yield vector_store_d2
+
 
 def test_mmr_traversal(vector_store_angular: VectorStore) -> None:
     """ Test end to end construction and MMR search.
@@ -262,6 +266,7 @@ def assert_document_format(doc: Document) -> None:
     assert doc.page_content is not None
     assert doc.metadata is not None
     assert "__embedding" not in doc.metadata
+
 
 class TestMmrGraphTraversal:
     def test_invoke_sync(
