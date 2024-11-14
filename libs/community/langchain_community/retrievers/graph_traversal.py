@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Iterable, Iterator, Literal, Tuple, Union, cast
+from typing import Any, Dict, Iterable, Iterator, List, Literal, Tuple, Union, cast
 
 from langchain_core.callbacks.manager import (
     AsyncCallbackManagerForRetrieverRun,
@@ -11,7 +11,7 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from abc import abstractmethod
 
@@ -24,6 +24,9 @@ class Edge():
         self.direction = direction
         self.key = key
         self.value = value
+
+    def __str__(self):
+        return f"{self.direction}:{self.key}:{self.value}"
 
 class GraphVectorStore(VectorStore):
     @abstractmethod
@@ -78,7 +81,20 @@ class DocumentCache:
 
 class GraphTraversalRetriever(BaseRetriever):
     vector_store: VectorStore
-    edges: Iterable[Union[str, Tuple[str, str]]]
+    edges: List[Union[str, Tuple[str, str]]]
+    _edge_lookup: Dict[str, str] = PrivateAttr(default={})
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        print("POST INIT")
+        for edge in self.edges:
+            if isinstance(edge, str):
+                self._edge_lookup[edge] = edge
+            elif isinstance(edge, tuple) and len(edge) == 2 and all(isinstance(item, str) for item in edge):
+                self._edge_lookup[edge[0]] = edge[1]
+            else:
+                raise ValueError("Invalid type for edge. must be 'str' or 'tuple[str,str]'")
+
 
     @property
     def _graph_vector_store(self) -> GraphVectorStore:
@@ -286,7 +302,10 @@ class GraphTraversalRetriever(BaseRetriever):
         # depth. These are edges that are either new, or newly discovered at a
         # lower depth.
         _outgoing_edges: set[Edge] = set()
+        print(f"\nLooking at Nodes:")
         for node in nodes:
+            print(f'\t{node}')
+
             if node.id is not None:
                 # If this document node is at a closer depth, update visited_ids
                 if d <= visited_ids.get(node.id, depth):
@@ -295,13 +314,18 @@ class GraphTraversalRetriever(BaseRetriever):
                     if d < depth:
                         # Record any new (or newly discovered at a lower depth)
                         # edges to the set to traverse.
+                        edges = self._get_outgoing_edges(doc=node)
                         for edge in self._get_outgoing_edges(doc=node):
+                            print(f"\tConsidering edge: {edge}")
                             if d <= visited_edges.get(edge, depth):
                                 # Record that we'll query this edge at the
                                 # given depth, so we don't fetch it again
                                 # (unless we find it an earlier depth)
                                 visited_edges[edge] = d
                                 _outgoing_edges.add(edge)
+        print("\nOutgoing Edges:")
+        for edge in _outgoing_edges:
+            print(f"\t{edge}")
         return _outgoing_edges
 
     def _get_metadata_filter(
@@ -322,5 +346,11 @@ class GraphTraversalRetriever(BaseRetriever):
             return metadata or {}
 
         metadata_filter = {} if metadata is None else metadata.copy()
-        metadata_filter[outgoing_edge.key] = outgoing_edge.value
+        if outgoing_edge.direction == "bidir":
+            metadata_filter[outgoing_edge.key] = outgoing_edge.value
+        elif outgoing_edge.direction == "out":
+            print(f"self._edge_lookup:{self._edge_lookup}")
+            in_key = self._edge_lookup[outgoing_edge.key]
+            metadata_filter[in_key] = outgoing_edge.value
+
         return metadata_filter
