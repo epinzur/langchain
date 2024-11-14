@@ -4,7 +4,7 @@ import json
 import os
 import random
 from contextlib import contextmanager
-from typing import Any, Generator, Iterable, List, Literal, Optional, cast
+from typing import Any, Generator, Iterable, List
 
 import pytest
 from langchain_chroma import Chroma
@@ -16,7 +16,8 @@ from langchain_community.retrievers import GraphTraversalRetriever
 from langchain_community.vectorstores import Cassandra, OpenSearchVectorSearch
 
 vector_store_types = [
-    "astra-db" "cassandra",
+    "astra-db",
+    "cassandra",
     "chroma-db",
     "open-search",
 ]
