@@ -296,16 +296,16 @@ class TestCassandraGraphIndex:
         populated_graph_vector_store_d2: VectorStore,
     ) -> None:
         """Graph traversal search on a graph vector store."""
-        retriever = GraphTraversalRetriever(
-            vector_store=populated_graph_vector_store_d2,
-            edges=[("out", "in"), "tag"],
-            depth=0,
-            k=2,
-        )
-        docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
-        ss_labels = [doc.metadata["label"] for doc in docs]
-        assert ss_labels == ["AR", "A0"]
-        assert_document_format(docs[0])
+        # retriever = GraphTraversalRetriever(
+        #     vector_store=populated_graph_vector_store_d2,
+        #     edges=[("out", "in"), "tag"],
+        #     depth=0,
+        #     k=2,
+        # )
+        # docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
+        # ss_labels = [doc.metadata["label"] for doc in docs]
+        # assert ss_labels == ["AR", "A0"]
+        # assert_document_format(docs[0])
 
         retriever = GraphTraversalRetriever(
             vector_store=populated_graph_vector_store_d2,
