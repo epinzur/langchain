@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 from abc import abstractmethod
 from typing import (
+    TYPE_CHECKING,
     Any,
     AsyncIterator,
     Dict,
@@ -25,6 +26,7 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
+from numpy.typing import NDArray
 from pydantic import BaseModel, PrivateAttr
 
 from langchain_community.utils.math import cosine_similarity
@@ -284,16 +286,12 @@ class MmrHelper:
 
         return selected_doc
 
-    def add_candidates(self, candidates: list[EmbeddedDocument]) -> None:
+    def add_candidates(self, candidates: dict[str, EmbeddedDocument]) -> None:
         """Add candidates to the consideration set."""
-        candidate_map: dict[str, EmbeddedDocument] = {
-            candidate.id: candidate_id for candidate in candidates
-        }
-
         # Determine the keys to actually include.
         # These are the candidates that aren't already selected
         # or under consideration.
-        include_ids_set = set(candidate_map.keys())
+        include_ids_set = set(candidates.keys())
         include_ids_set.difference_update(self.selected_ids)
         include_ids_set.difference_update(self.candidate_id_to_index.keys())
         include_ids = list(include_ids_set)
@@ -307,10 +305,12 @@ class MmrHelper:
             )
         )
         offset = self.candidate_embeddings.shape[0]
+        print("TACO")
         for index, candidate_id in enumerate(include_ids):
             if candidate_id in include_ids:
                 self.candidate_id_to_index[candidate_id] = offset + index
-                new_embeddings[index] = candidate_map[candidate_id].embedding
+                print(candidates[candidate_id])
+                new_embeddings[index] = candidates[candidate_id].embedding
 
         # Compute the similarity to the query.
         similarity = cosine_similarity(new_embeddings, self.query_embedding)
@@ -325,7 +325,7 @@ class MmrHelper:
             if redundancy.shape[0] > 0:
                 max_redundancy = redundancy[index].max()
             candidate = _Candidate(
-                doc=candidate_map[candidate_id].doc,
+                doc=candidates[candidate_id].document(),
                 similarity=similarity[index][0],
                 weighted_similarity=self.lambda_mult * similarity[index][0],
                 weighted_redundancy=self.lambda_mult_complement * max_redundancy,
@@ -456,6 +456,9 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 fetch_k=fetch_k,
                 filter=filter,
             )
+            print("initial_nodes")
+            for node in initial_nodes:
+                print(node)
             return query_embedding, self._get_candidate_embeddings(
                 nodes=initial_nodes, outgoing_edges_map=outgoing_edges_map
             )
@@ -499,6 +502,8 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             lambda_mult=lambda_mult,
             score_threshold=score_threshold,
         )
+        print("initial_candidates")
+        print(initial_candidates)
         helper.add_candidates(candidates=initial_candidates)
 
         if initial_roots:
@@ -509,19 +514,21 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         depths = {candidate_id: 0 for candidate_id in helper.candidate_ids()}
 
         # Select the best item, K times.
+        selected_docs: list[Document] = []
         for _ in range(k):
-            selected_id = helper.pop_best()
-
-            if selected_id is None:
+            selected_doc = helper.pop_best()
+            if selected_doc is None or selected_doc.id is None:
                 break
 
-            next_depth = depths[selected_id] + 1
+            selected_docs.append(selected_doc)
+
+            next_depth = depths[selected_doc.id] + 1
             if next_depth < depth:
                 # If the next document nodes would not exceed the depth limit, find the
                 # adjacent document nodes.
 
-                # Find the edges edgeed to from the selected id.
-                selected_outgoing_edges = outgoing_edges_map.pop(selected_id)
+                # Find the edges edged to from the selected id.
+                selected_outgoing_edges = outgoing_edges_map.pop(selected_doc.id)
 
                 # Don't re-visit already visited edges.
                 selected_outgoing_edges.difference_update(visited_edges)
@@ -560,7 +567,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 )
                 helper.add_candidates(new_candidates)
 
-        return helper.selected_ids
+        return selected_docs
 
     async def _aget_relevant_documents(
         self,
@@ -699,26 +706,29 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         depths = {candidate_id: 0 for candidate_id in helper.candidate_ids()}
 
         # Select the best item, K times.
+        selected_docs: list[Document] = []
         for _ in range(k):
-            selected_id = helper.pop_best()
+            selected_doc = helper.pop_best()
 
-            if selected_id is None:
+            if selected_doc is None or selected_doc.id is None:
                 break
 
-            next_depth = depths[selected_id] + 1
+            selected_docs.append(selected_doc)
+
+            next_depth = depths[selected_doc.id] + 1
             if next_depth < depth:
                 # If the next document nodes would not exceed the depth limit, find the
                 # adjacent document nodes.
 
                 # Find the edges edgeed to from the selected id.
-                selected_outgoing_edges = outgoing_edges_map.pop(selected_id)
+                selected_outgoing_edges = outgoing_edges_map.pop(selected_doc.id)
 
                 # Don't re-visit already visited edges.
                 selected_outgoing_edges.difference_update(visited_edges)
 
                 # Find the document nodes with incoming edges from those edges.
                 adjacent_nodes = await self._aget_adjacent(
-                    edges=selected_outgoing_edges,
+                    outgoing_edges=selected_outgoing_edges,
                     query_embedding=query_embedding,
                     k_per_edge=adjacent_k,
                     filter=filter,
@@ -750,7 +760,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 )
                 helper.add_candidates(new_candidates)
 
-        return helper.selected_ids
+        return selected_docs
 
     def _get_candidate_embeddings(
         self,
@@ -762,7 +772,6 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         Only returns document nodes not yet in the outgoing_edges_map.
         Updates the outgoing_edges_map with the new document node edges.
         """
-
         candidates: dict[str, EmbeddedDocument] = {}
         for node in nodes:
             if node.id not in outgoing_edges_map:
@@ -777,12 +786,15 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         filter: dict[str, Any] | None = None,  # noqa: A002
         **kwargs: Any,
     ) -> tuple[list[float], list[EmbeddedDocument]]:
-        return self.vector_store_adapter.similarity_search_with_embedding(
-            query=query,
-            k=fetch_k,
-            filter=filter,
-            **kwargs,
+        query_embedding, docs = (
+            self.vector_store_adapter.similarity_search_with_embedding(
+                query=query,
+                k=fetch_k,
+                filter=filter,
+                **kwargs,
+            )
         )
+        return query_embedding, [EmbeddedDocument(doc=doc) for doc in docs]
 
     async def _aget_initial(
         self,
@@ -791,12 +803,16 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         filter: dict[str, Any] | None = None,  # noqa: A002
         **kwargs: Any,
     ) -> tuple[list[float], list[EmbeddedDocument]]:
-        return await self.vector_store_adapter.asimilarity_search_with_embedding(
+        (
+            query_embedding,
+            docs,
+        ) = await self.vector_store_adapter.asimilarity_search_with_embedding(
             query=query,
             k=fetch_k,
             filter=filter,
             **kwargs,
         )
+        return query_embedding, [EmbeddedDocument(doc=doc) for doc in docs]
 
     def _get_adjacent(
         self,

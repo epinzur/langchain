@@ -11,7 +11,10 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 
-from langchain_community.retrievers import GraphMmrTraversalRetriever
+from langchain_community.retrievers import GraphMMRTraversalRetriever
+from langchain_community.retrievers.traversal_adapters import (
+    OpenSearchMMRTraversalAdapter,
+)
 from langchain_community.vectorstores import Cassandra, OpenSearchVectorSearch
 from tests.integration_tests.cache.fake_embeddings import (
     AngularTwoDimensionalEmbeddings,
@@ -222,6 +225,7 @@ def vector_store(
             opensearch_url="http://localhost:9200",
             index_name="graph_test_index",
             embedding_function=embeddings,
+            engine="lucene",
         )
         yield store
         store.delete_index()  # store.index_name
@@ -260,10 +264,12 @@ def test_mmr_traversal(vector_store: VectorStore) -> None:
     v2.metadata["incoming"] = "link"
     v3.metadata["incoming"] = "link"
 
-    vector_store.add_documents([v0, v1, v2, v3])
+    vector_store_adapter = OpenSearchMMRTraversalAdapter(vector_store=vector_store)
 
-    retriever = GraphMmrTraversalRetriever(
-        vector_store=vector_store,
+    vector_store_adapter.add_documents([v0, v1, v2, v3])
+
+    retriever = GraphMMRTraversalRetriever(
+        vector_store_adapter=vector_store_adapter,
         edges=[("outgoing", "incoming")],
         fetch_k=2,
         k=2,
@@ -307,8 +313,11 @@ class TestMmrGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
-        vector_store.add_documents(graph_vector_store_docs)
-        retriever = GraphMmrTraversalRetriever(
+        vector_store_adapter = OpenSearchMMRTraversalAdapter(vector_store=vector_store)
+
+        vector_store_adapter.add_documents(graph_vector_store_docs)
+        retriever = GraphMMRTraversalRetriever(
+            vector_store_adapter=vector_store_adapter,
             vector_store=vector_store,
             edges=[("out", "in"), "tag"],
             depth=2,
@@ -330,8 +339,11 @@ class TestMmrGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
-        vector_store.add_documents(graph_vector_store_docs)
-        retriever = GraphMmrTraversalRetriever(
+        vector_store_adapter = OpenSearchMMRTraversalAdapter(vector_store=vector_store)
+
+        await vector_store_adapter.aadd_documents(graph_vector_store_docs)
+        retriever = GraphMMRTraversalRetriever(
+            vector_store_adapter=vector_store_adapter,
             vector_store=vector_store,
             edges=[("out", "in"), "tag"],
             depth=2,
