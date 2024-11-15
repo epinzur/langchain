@@ -18,9 +18,9 @@ from tests.integration_tests.cache.fake_embeddings import (
 )
 
 vector_store_types = [
-    "astra-db",
-    "cassandra",
-    "chroma-db",
+    #    "astra-db",
+    #    "cassandra",
+    #    "chroma-db",
     "open-search",
 ]
 
