@@ -32,12 +32,14 @@ METADATA_EMBEDDING_KEY = "__embedding"
 
 
 class MMRTraversalAdapter(VectorStore):
+    _vector_store: VectorStore
+
     @property
     def _safe_embedding(self) -> Embeddings:
-        if not self.embeddings:
+        if not self._vector_store.embeddings:
             msg = "Missing embedding"
             raise ValueError(msg)
-        return self.embeddings
+        return self._vector_store.embeddings
 
     def similarity_search_with_embedding(
         self,
@@ -154,6 +156,14 @@ class MMRTraversalAdapter(VectorStore):
 
 class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
     def __init__(self, vector_store: OpenSearchVectorSearch):
+        if vector_store.engine not in ["lucene", "faiss"]:
+            msg = (
+                f"Invalid engine for MMR Traversal: '{vector_store.engine}'"
+                " please instantiate the Open Search Vector Store with"
+                " either the 'lucene' or 'faiss' engine"
+            )
+            raise ValueError(msg)
+        self._engine = vector_store.engine
         self._vector_store = vector_store
 
     def _build_filter(
@@ -211,12 +221,28 @@ class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
         #
         # The actual document metadata is moved down into a
         # sub "metadata" key.
+        print("BOOP")
         for doc in docs:
+            print(doc)
             embedding = doc.metadata["vector_field"]
             doc.metadata = doc.metadata["metadata"] or {}
             doc.metadata[METADATA_EMBEDDING_KEY] = embedding
 
         return docs
+
+    def add_documents(
+        self,
+        documents: Iterable[Document],
+        **kwargs: Any,
+    ) -> list[str]:
+        """Add document nodes to the graph vector store.
+
+        Args:
+            documents: the document nodes to add.
+            **kwargs: Additional keyword arguments.
+        """
+        kwargs["engine"] = self._engine
+        return self._vector_store.add_documents(documents, **kwargs)
 
     @classmethod
     def from_texts(self, *args: Any) -> OpenSearchVectorSearch:
