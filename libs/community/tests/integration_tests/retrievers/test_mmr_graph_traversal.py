@@ -6,30 +6,27 @@ from contextlib import contextmanager
 from typing import Any, Generator, Iterable, List
 
 import pytest
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 
-from langchain_community.retrievers import GraphTraversalRetriever
-from langchain_community.vectorstores import Cassandra
+from langchain_community.retrievers import GraphMmrTraversalRetriever
+from langchain_community.vectorstores import Cassandra, OpenSearchVectorSearch
 from tests.integration_tests.cache.fake_embeddings import (
     AngularTwoDimensionalEmbeddings,
 )
 
-TEST_KEYSPACE = "graph_test_keyspace"
+vector_store_types = [
+    "astra-db",
+    "cassandra",
+    "chroma-db",
+    "open-search",
+]
 
 
 def _doc_ids(docs: Iterable[Document]) -> List[str]:
     return [doc.id for doc in docs if doc.id is not None]
-
-
-class CassandraSession:
-    table_name: str
-    session: Any
-
-    def __init__(self, table_name: str, session: Any):
-        self.table_name = table_name
-        self.session = session
 
 
 class ParserEmbeddings(Embeddings):
@@ -51,11 +48,6 @@ class ParserEmbeddings(Embeddings):
         else:
             assert len(vals) == self.dimension
             return vals
-
-
-@pytest.fixture
-def embedding_d2() -> Embeddings:
-    return ParserEmbeddings(dimension=2)
 
 
 @pytest.fixture
@@ -113,24 +105,29 @@ def graph_vector_store_docs() -> list[Document]:
         doc_a.metadata["tag"] = f"ab_{suffix}"
         doc_a.metadata["out"] = f"at_{suffix}"
         doc_a.metadata["in"] = f"af_{suffix}"
-        # add_links(doc_a, Link.bidir(kind="ab_example", tag=f"tag_{suffix}"))
-        # add_links(doc_a, Link.outgoing(kind="at_example", tag=f"tag_{suffix}"))
-        # add_links(doc_a, Link.incoming(kind="af_example", tag=f"tag_{suffix}"))
     for doc_b, suffix in zip(docs_b, ["l", "0", "r"]):
         doc_b.metadata["tag"] = f"ab_{suffix}"
-        # add_links(doc_b, Link.bidir(kind="ab_example", tag=f"tag_{suffix}"))
     for doc_t, suffix in zip(docs_t, ["l", "0", "r"]):
         doc_t.metadata["in"] = f"at_{suffix}"
-        # add_links(doc_t, Link.incoming(kind="at_example", tag=f"tag_{suffix}"))
     for doc_f, suffix in zip(docs_f, ["l", "0", "r"]):
         doc_f.metadata["out"] = f"af_{suffix}"
-        # add_links(doc_f, Link.outgoing(kind="af_example", tag=f"tag_{suffix}"))
     return docs_a + docs_b + docs_f + docs_t
+
+
+class CassandraSession:
+    keyspace: str
+    table_name: str
+    session: Any
+
+    def __init__(self, keyspace: str, table_name: str, session: Any):
+        self.keyspace = keyspace
+        self.table_name = table_name
+        self.session = session
 
 
 @contextmanager
 def get_cassandra_session(
-    table_name: str, drop: bool = True
+    keyspace: str, table_name: str, drop: bool = True
 ) -> Generator[CassandraSession, None, None]:
     """Initialize the Cassandra cluster and session"""
     from cassandra.cluster import Cluster
@@ -150,16 +147,18 @@ def get_cassandra_session(
     try:
         session.execute(
             (
-                f"CREATE KEYSPACE IF NOT EXISTS {TEST_KEYSPACE}"
+                f"CREATE KEYSPACE IF NOT EXISTS {keyspace}"
                 " WITH replication = "
                 "{'class': 'SimpleStrategy', 'replication_factor': 1}"
             )
         )
         if drop:
-            session.execute(f"DROP TABLE IF EXISTS {TEST_KEYSPACE}.{table_name}")
+            session.execute(f"DROP TABLE IF EXISTS {keyspace}.{table_name}")
 
         # Yield the session for usage
-        yield CassandraSession(table_name=table_name, session=session)
+        yield CassandraSession(
+            keyspace=keyspace, table_name=table_name, session=session
+        )
     finally:
         # Ensure proper shutdown/cleanup of resources
         session.shutdown()
@@ -167,42 +166,73 @@ def get_cassandra_session(
 
 
 @pytest.fixture(scope="function")
-def vector_store_angular(
-    table_name: str = "graph_test_table",
+def vector_store(
+    request, embedding_type: str, vector_store_type: str
 ) -> Generator[VectorStore, None, None]:
-    with get_cassandra_session(table_name=table_name) as session:
-        yield Cassandra(
-            embedding=AngularTwoDimensionalEmbeddings(),
-            session=session.session,
-            keyspace=TEST_KEYSPACE,
-            table_name=session.table_name,
+    embeddings: Embeddings
+    if embedding_type == "angular-embeddings":
+        embeddings = AngularTwoDimensionalEmbeddings()
+    elif embedding_type == "d2-embeddings":
+        embeddings = ParserEmbeddings(dimension=2)
+    else:
+        msg = f"Unknown embeddings type: {embedding_type}"
+        raise ValueError(msg)
+
+    if vector_store_type == "astra-db":
+        try:
+            from astrapy.authentication import StaticTokenProvider
+            from dotenv import load_dotenv
+            from langchain_astradb import AstraDBVectorStore
+
+            load_dotenv()
+
+            token = StaticTokenProvider(os.environ["ASTRA_DB_APPLICATION_TOKEN"])
+
+            store = AstraDBVectorStore(
+                embedding=embeddings,
+                collection_name="graph_test_collection",
+                namespace="default_keyspace",
+                token=token,
+                api_endpoint=os.environ["ASTRA_DB_API_ENDPOINT"],
+            )
+            yield store
+            store.delete_collection()
+
+        except ImportError or ModuleNotFoundError:
+            msg = "to test graph-traversal with AstraDB, please install langchain-astradb and python-dotenv"
+            raise ImportError(msg)
+
+    elif vector_store_type == "cassandra":
+        with get_cassandra_session(
+            table_name="graph_test_table", keyspace="graph_test_keyspace"
+        ) as session:
+            store = Cassandra(
+                embedding=embeddings,
+                session=session.session,
+                keyspace=session.keyspace,
+                table_name=session.table_name,
+            )
+            yield store
+    elif vector_store_type == "chroma-db":
+        store = Chroma(embedding_function=embeddings)
+        yield store
+        store.delete_collection()
+    elif vector_store_type == "open-search":
+        store = OpenSearchVectorSearch(
+            opensearch_url="http://localhost:9200",
+            index_name="graph_test_index",
+            embedding_function=embeddings,
         )
+        yield store
+        store.delete_index()  # store.index_name
+    else:
+        msg = f"Unknown vector store type: {vector_store_type}"
+        raise ValueError(msg)
 
 
-@pytest.fixture(scope="function")
-def vector_store_d2(
-    embedding_d2: Embeddings,
-    table_name: str = "graph_test_table",
-) -> Generator[VectorStore, None, None]:
-    with get_cassandra_session(table_name=table_name) as session:
-        yield Cassandra(
-            embedding=embedding_d2,
-            session=session.session,
-            keyspace=TEST_KEYSPACE,
-            table_name=session.table_name,
-        )
-
-
-@pytest.fixture(scope="function")
-def populated_graph_vector_store_d2(
-    vector_store_d2: VectorStore,
-    graph_vector_store_docs: list[Document],
-) -> Generator[VectorStore, None, None]:
-    vector_store_d2.add_documents(graph_vector_store_docs)
-    yield vector_store_d2
-
-
-def test_mmr_traversal(vector_store_angular: VectorStore) -> None:
+@pytest.mark.parametrize("vector_store_type", vector_store_types)
+@pytest.mark.parametrize("embedding_type", ["angular-embeddings"])
+def test_mmr_traversal(vector_store: VectorStore) -> None:
     """ Test end to end construction and MMR search.
     The embedding function used here ensures `texts` become
     the following vectors on a circle (numbered v0 through v3):
@@ -230,10 +260,10 @@ def test_mmr_traversal(vector_store_angular: VectorStore) -> None:
     v2.metadata["incoming"] = "link"
     v3.metadata["incoming"] = "link"
 
-    vector_store_angular.add_documents([v0, v1, v2, v3])
+    vector_store.add_documents([v0, v1, v2, v3])
 
-    retriever = GraphTraversalRetriever(
-        vector_store=vector_store_angular,
+    retriever = GraphMmrTraversalRetriever(
+        vector_store=vector_store,
         edges=[("outgoing", "incoming")],
         fetch_k=2,
         k=2,
@@ -269,14 +299,20 @@ def assert_document_format(doc: Document) -> None:
 
 
 class TestMmrGraphTraversal:
+    @pytest.mark.parametrize("vector_store_type", vector_store_types)
+    @pytest.mark.parametrize("embedding_type", ["d2-embeddings"])
     def test_invoke_sync(
         self,
-        populated_graph_vector_store_d2: VectorStore,
+        vector_store: VectorStore,
+        graph_vector_store_docs: list[Document],
     ) -> None:
-        """MMR Graph traversal search on a graph vector store."""
-        retriever = GraphTraversalRetriever(
-            vector_store=populated_graph_vector_store_d2,
+        """MMR Graph traversal search on a vector store."""
+        vector_store.add_documents(graph_vector_store_docs)
+        retriever = GraphMmrTraversalRetriever(
+            vector_store=vector_store,
             edges=[("out", "in"), "tag"],
+            depth=2,
+            k=2,
         )
 
         docs = retriever.invoke(input="[2, 10]")
@@ -286,14 +322,20 @@ class TestMmrGraphTraversal:
         assert docs[0].metadata
         assert_document_format(docs[0])
 
+    @pytest.mark.parametrize("vector_store_type", vector_store_types)
+    @pytest.mark.parametrize("embedding_type", ["d2-embeddings"])
     async def test_invoke_async(
         self,
-        populated_graph_vector_store_d2: VectorStore,
+        vector_store: VectorStore,
+        graph_vector_store_docs: list[Document],
     ) -> None:
-        """MMR Graph traversal search on a graph vector store."""
-        retriever = GraphTraversalRetriever(
-            vector_store=populated_graph_vector_store_d2,
+        """MMR Graph traversal search on a vector store."""
+        vector_store.add_documents(graph_vector_store_docs)
+        retriever = GraphMmrTraversalRetriever(
+            vector_store=vector_store,
             edges=[("out", "in"), "tag"],
+            depth=2,
+            k=2,
         )
         mt_labels = set()
         docs = await retriever.ainvoke(input="[2, 10]")
