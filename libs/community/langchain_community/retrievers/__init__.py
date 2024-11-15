@@ -44,9 +44,6 @@ if TYPE_CHECKING:
     from langchain_community.retrievers.breebs import (
         BreebsRetriever,
     )
-    from langchain_community.retrievers.cassandra_graph_index import (
-        CassandraGraphIndex,
-    )
     from langchain_community.retrievers.chaindesk import (
         ChaindeskRetriever,
     )
@@ -75,6 +72,9 @@ if TYPE_CHECKING:
         GoogleCloudEnterpriseSearchRetriever,
         GoogleVertexAIMultiTurnSearchRetriever,
         GoogleVertexAISearchRetriever,
+    )
+    from langchain_community.retrievers.graph_mmr_traversal import (
+        GraphMMRTraversalRetriever,
     )
     from langchain_community.retrievers.graph_traversal import (
         GraphTraversalRetriever,
@@ -161,7 +161,6 @@ _module_lookup = {
     "AzureCognitiveSearchRetriever": "langchain_community.retrievers.azure_ai_search",
     "BM25Retriever": "langchain_community.retrievers.bm25",
     "BreebsRetriever": "langchain_community.retrievers.breebs",
-    "CassandraGraphIndex": "langchain_community.retrievers.cassandra_graph_index",
     "ChaindeskRetriever": "langchain_community.retrievers.chaindesk",
     "ChatGPTPluginRetriever": "langchain_community.retrievers.chatgpt_plugin_retriever",
     "CohereRagRetriever": "langchain_community.retrievers.cohere_rag_retriever",
@@ -173,6 +172,7 @@ _module_lookup = {
     "GoogleDocumentAIWarehouseRetriever": "langchain_community.retrievers.google_cloud_documentai_warehouse",  # noqa: E501
     "GoogleVertexAIMultiTurnSearchRetriever": "langchain_community.retrievers.google_vertex_ai_search",  # noqa: E501
     "GoogleVertexAISearchRetriever": "langchain_community.retrievers.google_vertex_ai_search",  # noqa: E501
+    "GraphMMRTraversalRetriever": "langchain_community.retrievers.graph_mmr_traversal",
     "GraphTraversalRetriever": "langchain_community.retrievers.graph_traversal",
     "KNNRetriever": "langchain_community.retrievers.knn",
     "KayAiRetriever": "langchain_community.retrievers.kay",
@@ -219,7 +219,6 @@ __all__ = [
     "AzureCognitiveSearchRetriever",
     "BM25Retriever",
     "BreebsRetriever",
-    "CassandraGraphIndex",
     "ChaindeskRetriever",
     "ChatGPTPluginRetriever",
     "CohereRagRetriever",
@@ -231,6 +230,7 @@ __all__ = [
     "GoogleDocumentAIWarehouseRetriever",
     "GoogleVertexAIMultiTurnSearchRetriever",
     "GoogleVertexAISearchRetriever",
+    "GraphMMRTraversalRetriever",
     "GraphTraversalRetriever",
     "KayAiRetriever",
     "KNNRetriever",
