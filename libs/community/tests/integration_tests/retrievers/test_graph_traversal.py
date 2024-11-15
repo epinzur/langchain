@@ -123,18 +123,12 @@ def graph_vector_store_docs() -> list[Document]:
         doc_a.metadata["tag"] = f"ab_{suffix}"
         doc_a.metadata["out"] = f"at_{suffix}"
         doc_a.metadata["in"] = f"af_{suffix}"
-        # add_links(doc_a, Link.bidir(kind="ab_example", tag=f"tag_{suffix}"))
-        # add_links(doc_a, Link.outgoing(kind="at_example", tag=f"tag_{suffix}"))
-        # add_links(doc_a, Link.incoming(kind="af_example", tag=f"tag_{suffix}"))
     for doc_b, suffix in zip(docs_b, ["l", "0", "r"]):
         doc_b.metadata["tag"] = f"ab_{suffix}"
-        # add_links(doc_b, Link.bidir(kind="ab_example", tag=f"tag_{suffix}"))
     for doc_t, suffix in zip(docs_t, ["l", "0", "r"]):
         doc_t.metadata["in"] = f"at_{suffix}"
-        # add_links(doc_t, Link.incoming(kind="at_example", tag=f"tag_{suffix}"))
     for doc_f, suffix in zip(docs_f, ["l", "0", "r"]):
         doc_f.metadata["out"] = f"af_{suffix}"
-        # add_links(doc_f, Link.outgoing(kind="af_example", tag=f"tag_{suffix}"))
     return docs_a + docs_b + docs_f + docs_t
 
 
@@ -312,15 +306,15 @@ def assert_document_format(doc: Document) -> None:
 # can all handle simple metadata fields
 
 
-class TestCassandraGraphIndex:
+class TestGraphTraversal:
     @pytest.mark.parametrize("vector_store_type", vector_store_types)
     @pytest.mark.parametrize("embedding_type", ["d2-embeddings"])
-    def test_gvs_traversal_search_sync(
+    def test_invoke_sync(
         self,
         vector_store: VectorStore,
         graph_vector_store_docs: list[Document],
     ) -> None:
-        """Graph traversal search on a graph vector store."""
+        """Graph traversal search on a vector store."""
         vector_store.add_documents(graph_vector_store_docs)
         retriever = GraphTraversalRetriever(
             vector_store=vector_store,
@@ -329,10 +323,10 @@ class TestCassandraGraphIndex:
             k=2,
         )
 
-        # docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
-        # ss_labels = [doc.metadata["label"] for doc in docs]
-        # assert ss_labels == ["AR", "A0"]
-        # assert_document_format(docs[0])
+        docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
+        ss_labels = [doc.metadata["label"] for doc in docs]
+        assert ss_labels == ["AR", "A0"]
+        assert_document_format(docs[0])
 
         docs = retriever.invoke(input="[2, 10]", depth=2, k=2)
         # this is a set, as some of the internals of trav.search are set-driven
@@ -343,12 +337,12 @@ class TestCassandraGraphIndex:
 
     @pytest.mark.parametrize("vector_store_type", vector_store_types)
     @pytest.mark.parametrize("embedding_type", ["d2-embeddings"])
-    async def test_gvs_traversal_search_async(
+    async def test_invoke_async(
         self,
         vector_store: VectorStore,
         graph_vector_store_docs: list[Document],
     ) -> None:
-        """Graph traversal search on a graph vector store."""
+        """Graph traversal search on a graph store."""
         await vector_store.aadd_documents(graph_vector_store_docs)
         retriever = GraphTraversalRetriever(
             vector_store=vector_store,
