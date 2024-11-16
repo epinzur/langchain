@@ -13,6 +13,9 @@ from langchain_core.vectorstores import VectorStore
 
 from langchain_community.retrievers import GraphMMRTraversalRetriever
 from langchain_community.retrievers.traversal_adapters import (
+    CassandraMMRTraversalAdapter,
+    ChromaMMRTraversalAdapter,
+    MMRTraversalAdapter,
     OpenSearchMMRTraversalAdapter,
 )
 from langchain_community.vectorstores import Cassandra, OpenSearchVectorSearch
@@ -22,9 +25,9 @@ from tests.integration_tests.cache.fake_embeddings import (
 
 vector_store_types = [
     #    "astra-db",
-    #    "cassandra",
-    #    "chroma-db",
-    "open-search",
+        "cassandra",
+    # "chroma-db",
+    # "open-search",
 ]
 
 
@@ -234,9 +237,23 @@ def vector_store(
         raise ValueError(msg)
 
 
+def get_adapter(
+    vector_store: VectorStore, vector_store_type: str
+) -> MMRTraversalAdapter:
+    if vector_store_type in ["astra-db", "cassandra"]:
+        return CassandraMMRTraversalAdapter(vector_store=vector_store)
+    elif vector_store_type == "chroma-db":
+        return ChromaMMRTraversalAdapter(vector_store=vector_store)
+    elif vector_store_type == "open-search":
+        return OpenSearchMMRTraversalAdapter(vector_store=vector_store)
+    else:
+        msg = f"Unknown vector store type: {vector_store_type}"
+        raise ValueError(msg)
+
+
 @pytest.mark.parametrize("vector_store_type", vector_store_types)
 @pytest.mark.parametrize("embedding_type", ["angular-embeddings"])
-def test_mmr_traversal(vector_store: VectorStore) -> None:
+def test_mmr_traversal(vector_store: VectorStore, vector_store_type: str) -> None:
     """ Test end to end construction and MMR search.
     The embedding function used here ensures `texts` become
     the following vectors on a circle (numbered v0 through v3):
@@ -264,7 +281,10 @@ def test_mmr_traversal(vector_store: VectorStore) -> None:
     v2.metadata["incoming"] = "link"
     v3.metadata["incoming"] = "link"
 
-    vector_store_adapter = OpenSearchMMRTraversalAdapter(vector_store=vector_store)
+    vector_store_adapter = get_adapter(
+        vector_store=vector_store,
+        vector_store_type=vector_store_type,
+    )
 
     vector_store_adapter.add_documents([v0, v1, v2, v3])
 
@@ -310,10 +330,14 @@ class TestMmrGraphTraversal:
     def test_invoke_sync(
         self,
         vector_store: VectorStore,
+        vector_store_type: str,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
-        vector_store_adapter = OpenSearchMMRTraversalAdapter(vector_store=vector_store)
+        vector_store_adapter = get_adapter(
+            vector_store=vector_store,
+            vector_store_type=vector_store_type,
+        )
 
         vector_store_adapter.add_documents(graph_vector_store_docs)
         retriever = GraphMMRTraversalRetriever(
@@ -336,10 +360,14 @@ class TestMmrGraphTraversal:
     async def test_invoke_async(
         self,
         vector_store: VectorStore,
+        vector_store_type: str,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
-        vector_store_adapter = OpenSearchMMRTraversalAdapter(vector_store=vector_store)
+        vector_store_adapter = get_adapter(
+            vector_store=vector_store,
+            vector_store_type=vector_store_type,
+        )
 
         await vector_store_adapter.aadd_documents(graph_vector_store_docs)
         retriever = GraphMMRTraversalRetriever(
