@@ -29,7 +29,7 @@ vector_store_types = [
 
 
 def _doc_ids(docs: Iterable[Document]) -> List[str]:
-    return [doc.id for doc in docs if doc.id is not None]
+    return {doc.id for doc in docs if doc.id is not None}
 
 
 class ParserEmbeddings(Embeddings):
@@ -277,24 +277,24 @@ def test_mmr_traversal(vector_store: VectorStore) -> None:
     )
 
     docs = retriever.invoke("0.0", k=2, fetch_k=2)
-    assert _doc_ids(docs) == ["v0", "v2"]
+    assert _doc_ids(docs) == {"v0", "v2"}
 
     # With max depth 0, no edges are traversed, so this doesn't reach v2 or v3.
     # So it ends up picking "v1" even though it's similar to "v0".
     docs = retriever.invoke("0.0", k=2, fetch_k=2, depth=0)
-    assert _doc_ids(docs) == ["v0", "v1"]
+    assert _doc_ids(docs) == {"v0", "v1"}
 
     # With max depth 0 but higher `fetch_k`, we encounter v2
     docs = retriever.invoke("0.0", k=2, fetch_k=3, depth=0)
-    assert _doc_ids(docs) == ["v0", "v2"]
+    assert _doc_ids(docs) == {"v0", "v2"}
 
     # v0 score is .46, v2 score is 0.16 so it won't be chosen.
     docs = retriever.invoke("0.0", k=2, score_threshold=0.2)
-    assert _doc_ids(docs) == ["v0"]
+    assert _doc_ids(docs) == {"v0"}
 
     # with k=4 we should get all of the documents.
     docs = retriever.invoke("0.0", k=4)
-    assert _doc_ids(docs) == ["v0", "v2", "v1", "v3"]
+    assert _doc_ids(docs) == {"v0", "v2", "v1", "v3"}
 
 
 def assert_document_format(doc: Document) -> None:
