@@ -13,20 +13,16 @@ from typing import (
 )
 
 from chromadb.api.types import IncludeEnum
-from langchain_astradb import AstraDBVectorStore
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import run_in_executor
 from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
 
-from langchain_community.vectorstores import OpenSearchVectorSearch
-
 METADATA_EMBEDDING_KEY = "__embedding"
 
 
-class MMRTraversalAdapter(VectorStore):
+class MMRTraversalAdapter:
     _base_vector_store: VectorStore
 
     @property
@@ -150,17 +146,18 @@ class MMRTraversalAdapter(VectorStore):
 
 
 class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
-    def __init__(self, vector_store: OpenSearchVectorSearch):
-        if vector_store.engine not in ["lucene", "faiss"]:
+    def __init__(self, vector_store: VectorStore):
+        from langchain_community.vectorstores import OpenSearchVectorSearch
+
+        self._base_vector_store = vector_store
+        self._vector_store = cast(OpenSearchVectorSearch, vector_store)
+        if self._vector_store.engine not in ["lucene", "faiss"]:
             msg = (
-                f"Invalid engine for MMR Traversal: '{vector_store.engine}'"
+                f"Invalid engine for MMR Traversal: '{self._vector_store.engine}'"
                 " please instantiate the Open Search Vector Store with"
                 " either the 'lucene' or 'faiss' engine"
             )
             raise ValueError(msg)
-        self._engine = vector_store.engine
-        self._vector_store = vector_store
-        self._base_vector_store = vector_store
 
     def _build_filter(
         self, filter: Optional[Dict[str, str]] = None
@@ -212,40 +209,16 @@ class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
 
         return docs
 
-    def add_documents(
-        self,
-        documents: Iterable[Document],
-        **kwargs: Any,
-    ) -> list[str]:
-        """Add document nodes to the graph vector store."""
-        kwargs["engine"] = self._engine
-        return self._vector_store.add_documents(documents, **kwargs)
-
-    async def aadd_documents(
-        self,
-        documents: Iterable[Document],
-        **kwargs: Any,
-    ) -> list[str]:
-        """Add document nodes to the graph vector store."""
-        kwargs["engine"] = self._engine
-        return await self._vector_store.aadd_documents(documents, **kwargs)
-
-    @classmethod
-    def from_texts(self, *args: Any) -> OpenSearchVectorSearch:
-        return OpenSearchVectorSearch.from_texts(*args)
-
-    def similarity_search(self, *args: Any) -> List[Document]:
-        return self._vector_store.similarity_search(*args)
-
-    # Delegate all other methods to the underlying vector store
-    def __getattr__(self, name: str) -> Any:
-        print("__getattr__")
-        return getattr(self._vector_store, name)
-
 
 class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
-    def __init__(self, vector_store: Chroma):
-        self._vector_store = vector_store
+    def __init__(self, vector_store: VectorStore):
+        try:
+            from langchain_chroma import Chroma
+        except ImportError or ModuleNotFoundError:
+            msg = "please `pip install langchain-chroma`"
+            raise ImportError(msg)
+
+        self._vector_store = cast(Chroma, vector_store)
         self._base_vector_store = vector_store
 
     def similarity_search_with_embedding_by_vector(
@@ -256,7 +229,7 @@ class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
         **kwargs: Any,
     ) -> List[Document]:
         """Returns docs (with embeddings) most similar to the query vector."""
-        results = self._collection.query(
+        results = self._vector_store._collection.query(
             query_embeddings=embedding,  # type: ignore
             n_results=k,
             where=filter,  # type: ignore
@@ -286,22 +259,16 @@ class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
             )
         return docs
 
-    @classmethod
-    def from_texts(self, *args: Any) -> Chroma:
-        return Chroma.from_texts(*args)
 
-    def similarity_search(self, *args: Any) -> List[Document]:
-        return self._vector_store.similarity_search(*args)
+class AstraMMRTraversalAdapter(MMRTraversalAdapter):
+    def __init__(self, vector_store: ValueError):
+        try:
+            from langchain_astradb import AstraDBVectorStore
+        except ImportError or ModuleNotFoundError:
+            msg = "please `pip install langchain-astradb`"
+            raise ImportError(msg)
 
-    # Delegate all other methods to the underlying vector store
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._vector_store, name)
-
-
-class CassandraMMRTraversalAdapter(MMRTraversalAdapter):
-    def __init__(self, vector_store: AstraDBVectorStore):
-        self._vector_store = vector_store
-        self._base_vector_store = vector_store
+        self._vector_store = cast(AstraDBVectorStore, vector_store)
 
     def _build_docs(
         self, docs_with_embeddings: list[tuple[Document, list[float]]]
@@ -389,13 +356,31 @@ class CassandraMMRTraversalAdapter(MMRTraversalAdapter):
         )
         return self._build_docs(docs_with_embeddings=docs_with_embeddings)
 
-    @classmethod
-    def from_texts(self, *args: Any) -> AstraDBVectorStore:
-        return AstraDBVectorStore.from_texts(*args)
 
-    def similarity_search(self, *args: Any) -> List[Document]:
-        return self._vector_store.similarity_search(*args)
+class CassandraMMRTraversalAdapter(MMRTraversalAdapter):
+    def __init__(self, vector_store: ValueError):
+        from langchain_community.vectorstores import Cassandra
 
-    # Delegate all other methods to the underlying vector store
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._vector_store, name)
+        self._vector_store = cast(Cassandra, vector_store)
+
+    def similarity_search_with_embedding(
+        self, **kwargs: Any
+    ) -> Tuple[List[float], List[Document]]:
+        return self._vector_store.similarity_search_with_embedding(**kwargs)
+
+    async def asimilarity_search_with_embedding(
+        self, **kwargs: Any
+    ) -> Tuple[List[float], List[Document]]:
+        return await self._vector_store.asimilarity_search_with_embedding(**kwargs)
+
+    def similarity_search_with_embedding_by_vector(
+        self, **kwargs: Any
+    ) -> List[Document]:
+        return self._vector_store.similarity_search_with_embedding_by_vector(**kwargs)
+
+    async def asimilarity_search_with_embedding_by_vector(
+        self, **kwargs: Any
+    ) -> List[Document]:
+        return await self._vector_store.asimilarity_search_with_embedding_by_vector(
+            **kwargs
+        )

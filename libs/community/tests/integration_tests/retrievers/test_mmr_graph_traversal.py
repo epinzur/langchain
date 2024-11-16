@@ -13,6 +13,7 @@ from langchain_core.vectorstores import VectorStore
 
 from langchain_community.retrievers import GraphMMRTraversalRetriever
 from langchain_community.retrievers.traversal_adapters import (
+    AstraMMRTraversalAdapter,
     CassandraMMRTraversalAdapter,
     ChromaMMRTraversalAdapter,
     MMRTraversalAdapter,
@@ -24,10 +25,10 @@ from tests.integration_tests.cache.fake_embeddings import (
 )
 
 vector_store_types = [
-    #    "astra-db",
-        "cassandra",
-    # "chroma-db",
-    # "open-search",
+    "astra-db",
+    "cassandra",
+    "chroma-db",
+    "open-search",
 ]
 
 
@@ -240,7 +241,9 @@ def vector_store(
 def get_adapter(
     vector_store: VectorStore, vector_store_type: str
 ) -> MMRTraversalAdapter:
-    if vector_store_type in ["astra-db", "cassandra"]:
+    if vector_store_type == "astra-db":
+        return AstraMMRTraversalAdapter(vector_store=vector_store)
+    elif vector_store_type == "cassandra":
         return CassandraMMRTraversalAdapter(vector_store=vector_store)
     elif vector_store_type == "chroma-db":
         return ChromaMMRTraversalAdapter(vector_store=vector_store)
@@ -260,10 +263,10 @@ def test_mmr_traversal(vector_store: VectorStore, vector_store_type: str) -> Non
 
            ______ v2
           /      \
-         /        |  v1
+         /        \  v1
     v3  |     .    | query
-         |        /  v0
-          |______/                 (N.B. very crude drawing)
+         \        /  v0
+          \______/                 (N.B. very crude drawing)
 
     With fetch_k==2 and k==2, when query is at (1, ),
     one expects that v2 and v0 are returned (in some order)
@@ -281,12 +284,12 @@ def test_mmr_traversal(vector_store: VectorStore, vector_store_type: str) -> Non
     v2.metadata["incoming"] = "link"
     v3.metadata["incoming"] = "link"
 
+    vector_store.add_documents([v0, v1, v2, v3], engine="faiss")
+
     vector_store_adapter = get_adapter(
         vector_store=vector_store,
         vector_store_type=vector_store_type,
     )
-
-    vector_store_adapter.add_documents([v0, v1, v2, v3])
 
     retriever = GraphMMRTraversalRetriever(
         vector_store_adapter=vector_store_adapter,
@@ -334,12 +337,13 @@ class TestMmrGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
+        vector_store.add_documents(graph_vector_store_docs, engine="faiss")
+
         vector_store_adapter = get_adapter(
             vector_store=vector_store,
             vector_store_type=vector_store_type,
         )
 
-        vector_store_adapter.add_documents(graph_vector_store_docs)
         retriever = GraphMMRTraversalRetriever(
             vector_store_adapter=vector_store_adapter,
             vector_store=vector_store,
@@ -364,12 +368,13 @@ class TestMmrGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
+        await vector_store.aadd_documents(graph_vector_store_docs, engine="faiss")
+
         vector_store_adapter = get_adapter(
             vector_store=vector_store,
             vector_store_type=vector_store_type,
         )
 
-        await vector_store_adapter.aadd_documents(graph_vector_store_docs)
         retriever = GraphMMRTraversalRetriever(
             vector_store_adapter=vector_store_adapter,
             vector_store=vector_store,
