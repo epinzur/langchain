@@ -221,9 +221,7 @@ class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
         #
         # The actual document metadata is moved down into a
         # sub "metadata" key.
-        print("BOOP")
         for doc in docs:
-            print(doc)
             embedding = doc.metadata["vector_field"]
             doc.metadata = doc.metadata["metadata"] or {}
             doc.metadata[METADATA_EMBEDDING_KEY] = embedding

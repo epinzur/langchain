@@ -52,6 +52,10 @@ NEG_INF = float("-inf")
 METADATA_EMBEDDING_KEY = "__embedding"
 
 
+def default(value, fallback):
+    return value if value is not None else fallback
+
+
 @dataclasses.dataclass
 class EmbeddedDocument:
     doc: Document
@@ -305,11 +309,9 @@ class MmrHelper:
             )
         )
         offset = self.candidate_embeddings.shape[0]
-        print("TACO")
         for index, candidate_id in enumerate(include_ids):
             if candidate_id in include_ids:
                 self.candidate_id_to_index[candidate_id] = offset + index
-                print(candidates[candidate_id])
                 new_embeddings[index] = candidates[candidate_id].embedding
 
         # Compute the similarity to the query.
@@ -376,6 +378,12 @@ class Edge:
 class GraphMMRTraversalRetriever(BaseRetriever):
     vector_store_adapter: MMRTraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
+    k: int = 4
+    depth: int = 2
+    fetch_k: int = 100
+    adjacent_k: int = 10
+    lambda_mult: float = 0.5
+    score_threshold: float = float("-inf")
     _edge_lookup: Dict[str, str] = PrivateAttr(default={})
 
     def __init__(self, **kwargs):
@@ -399,12 +407,12 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         query: str,
         *,
         initial_roots: Sequence[str] = (),
-        k: int = 4,
-        depth: int = 2,
-        fetch_k: int = 100,
-        adjacent_k: int = 10,
-        lambda_mult: float = 0.5,
-        score_threshold: float = float("-inf"),
+        k: int | None = None,
+        depth: int | None = None,
+        fetch_k: int | None = None,
+        adjacent_k: int | None = None,
+        lambda_mult: float | None = None,
+        score_threshold: float | None = None,
         filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> list[Document]:
@@ -440,6 +448,13 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             filter: Optional metadata to filter the results.
             **kwargs: Additional keyword arguments.
         """
+        k = default(k, self.k)
+        depth = default(depth, self.depth)
+        fetch_k = default(fetch_k, self.fetch_k)
+        adjacent_k = default(adjacent_k, self.adjacent_k)
+        lambda_mult = default(lambda_mult, self.lambda_mult)
+        score_threshold = default(score_threshold, self.score_threshold)
+
         # For each unselected node, stores the outgoing edges.
         outgoing_edges_map: dict[str, set[Edge]] = {}
         visited_edges: set[Edge] = set()
@@ -455,10 +470,8 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 query=query,
                 fetch_k=fetch_k,
                 filter=filter,
+                **kwargs,
             )
-            print("initial_nodes")
-            for node in initial_nodes:
-                print(node)
             return query_embedding, self._get_candidate_embeddings(
                 nodes=initial_nodes, outgoing_edges_map=outgoing_edges_map
             )
@@ -478,6 +491,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             # neighborhood. This prevents re-visiting them.
             visited_edges = set()
 
+            # TODO this still needs to exist
             for doc in self.vector_store_adapter.get_documents_by_ids(
                 doc_ids=neighborhood
             ):
@@ -489,6 +503,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 query_embedding=query_embedding,
                 k_per_edge=adjacent_k,
                 filter=filter,
+                **kwargs,
             )
 
             return self._get_candidate_embeddings(
@@ -502,8 +517,6 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             lambda_mult=lambda_mult,
             score_threshold=score_threshold,
         )
-        print("initial_candidates")
-        print(initial_candidates)
         helper.add_candidates(candidates=initial_candidates)
 
         if initial_roots:
@@ -539,6 +552,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                     query_embedding=query_embedding,
                     k_per_edge=adjacent_k,
                     filter=filter,
+                    **kwargs,
                 )
 
                 # Record the selected_outgoing_edges as visited.
@@ -574,12 +588,12 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         query: str,
         *,
         initial_roots: Sequence[str] = (),
-        k: int = 4,
-        depth: int = 2,
-        fetch_k: int = 100,
-        adjacent_k: int = 10,
-        lambda_mult: float = 0.5,
-        score_threshold: float = float("-inf"),
+        k: int | None = None,
+        depth: int | None = None,
+        fetch_k: int | None = None,
+        adjacent_k: int | None = None,
+        lambda_mult: float | None = None,
+        score_threshold: float | None = None,
         filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> list[Document]:
@@ -627,6 +641,13 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             filter: Optional metadata to filter the results.
             **kwargs: Additional keyword arguments.
         """
+        k = default(k, self.k)
+        depth = default(depth, self.depth)
+        fetch_k = default(fetch_k, self.fetch_k)
+        adjacent_k = default(adjacent_k, self.adjacent_k)
+        lambda_mult = default(lambda_mult, self.lambda_mult)
+        score_threshold = default(score_threshold, self.score_threshold)
+
         # For each unselected node, stores the outgoing edges.
         outgoing_edges_map: dict[str, set[Edge]] = {}
         visited_edges: set[Edge] = set()
@@ -643,6 +664,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 query=query,
                 fetch_k=fetch_k,
                 filter=filter,
+                **kwargs,
             )
 
             return query_embedding, self._get_candidate_embeddings(
@@ -683,6 +705,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 query_embedding=query_embedding,
                 k_per_edge=adjacent_k,
                 filter=filter,
+                **kwargs,
             )
 
             return self._get_candidate_embeddings(
@@ -732,6 +755,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                     query_embedding=query_embedding,
                     k_per_edge=adjacent_k,
                     filter=filter,
+                    **kwargs,
                 )
 
                 # Record the selected_outgoing_edges as visited.
@@ -820,6 +844,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         query_embedding: list[float],
         k_per_edge: int | None = None,
         filter: dict[str, Any] | None = None,  # noqa: A002
+        **kwargs: Any,
     ) -> set[EmbeddedDocument]:
         """Return the target docs with incoming edges from any of the given edges.
 
@@ -841,6 +866,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 filter=self._get_metadata_filter(
                     metadata=filter, outgoing_edge=outgoing_edge
                 ),
+                **kwargs,
             )
             results.update({EmbeddedDocument(doc=doc) for doc in docs})
         return results
@@ -851,6 +877,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         query_embedding: list[float],
         k_per_edge: int | None = None,
         filter: dict[str, Any] | None = None,  # noqa: A002
+        **kwargs: Any,
     ) -> set[EmbeddedDocument]:
         """Returns document nodes with incoming edges from any of the given edges.
 
@@ -872,6 +899,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 filter=self._get_metadata_filter(
                     metadata=filter, outgoing_edge=outgoing_edge
                 ),
+                **kwargs,
             )
             for outgoing_edge in outgoing_edges
         ]
