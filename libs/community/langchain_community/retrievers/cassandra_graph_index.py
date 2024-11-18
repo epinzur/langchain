@@ -12,17 +12,14 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    Type,
-    TypeVar,
     Union,
 )
 
-from langchain_core._api import beta
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.indexing import DocumentIndex, UpsertResponse
 from langchain_core.indexing.base import DeleteResponse
-from pydantic import Field, PrivateAttr
+from pydantic import PrivateAttr
 
 from langchain_community.utilities.cassandra import SetupMode
 from langchain_community.vectorstores.cassandra import Cassandra as CassandraVectorStore
@@ -128,16 +125,17 @@ class CassandraGraphIndex(DocumentIndex):
             **kwargs,
         )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         try:
-            from cassandra.cluster import Session
+            from cassandra.cluster import Session  # noqa: F401
         except (ImportError, ModuleNotFoundError):
             raise ImportError(
                 "Could not import cassio python package. "
                 "Please install it with `pip install cassio`."
             )
 
-        # Assuming embedding and other attributes are initialized as class-level fields or injected post-init
+        # Assuming embedding and other attributes are initialized
+        # as class-level fields or injected post-init
 
     def upsert(self, items: Sequence[Document], /, **kwargs: Any) -> UpsertResponse:
         """Upsert documents into the index.
@@ -163,7 +161,7 @@ class CassandraGraphIndex(DocumentIndex):
             if item.id is None:
                 item.id = secrets.token_hex(8)
         ids = self._vector_store.add_documents(documents=items)
-        return UpsertResponse(succeeded=ids)
+        return UpsertResponse(succeeded=ids, failed=[])
 
     def delete(self, ids: Optional[list[str]] = None, **kwargs: Any) -> DeleteResponse:
         """Delete by IDs or other criteria.

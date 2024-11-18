@@ -1,14 +1,10 @@
-import asyncio
 from abc import abstractmethod
 from typing import (
     Any,
     Dict,
-    Iterable,
     List,
-    Literal,
     Optional,
     Tuple,
-    Union,
     cast,
 )
 
@@ -16,7 +12,6 @@ from chromadb.api.types import IncludeEnum
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.runnables import run_in_executor
-from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
 
 METADATA_EMBEDDING_KEY = "__embedding"
@@ -214,7 +209,7 @@ class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
     def __init__(self, vector_store: VectorStore):
         try:
             from langchain_chroma import Chroma
-        except ImportError or ModuleNotFoundError:
+        except (ImportError, ModuleNotFoundError):
             msg = "please `pip install langchain-chroma`"
             raise ImportError(msg)
 
@@ -264,7 +259,7 @@ class AstraMMRTraversalAdapter(MMRTraversalAdapter):
     def __init__(self, vector_store: ValueError):
         try:
             from langchain_astradb import AstraDBVectorStore
-        except ImportError or ModuleNotFoundError:
+        except (ImportError, ModuleNotFoundError):
             msg = "please `pip install langchain-astradb`"
             raise ImportError(msg)
 
@@ -363,22 +358,22 @@ class CassandraMMRTraversalAdapter(MMRTraversalAdapter):
 
         self._vector_store = cast(Cassandra, vector_store)
 
-    def similarity_search_with_embedding(
+    def similarity_search_with_embedding(  # type: ignore
         self, **kwargs: Any
     ) -> Tuple[List[float], List[Document]]:
         return self._vector_store.similarity_search_with_embedding(**kwargs)
 
-    async def asimilarity_search_with_embedding(
+    async def asimilarity_search_with_embedding(  # type: ignore
         self, **kwargs: Any
     ) -> Tuple[List[float], List[Document]]:
         return await self._vector_store.asimilarity_search_with_embedding(**kwargs)
 
-    def similarity_search_with_embedding_by_vector(
+    def similarity_search_with_embedding_by_vector(  # type: ignore
         self, **kwargs: Any
     ) -> List[Document]:
         return self._vector_store.similarity_search_with_embedding_by_vector(**kwargs)
 
-    async def asimilarity_search_with_embedding_by_vector(
+    async def asimilarity_search_with_embedding_by_vector(  # type: ignore
         self, **kwargs: Any
     ) -> List[Document]:
         return await self._vector_store.asimilarity_search_with_embedding_by_vector(
