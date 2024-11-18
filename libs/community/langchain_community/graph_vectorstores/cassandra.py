@@ -574,7 +574,7 @@ class CassandraGraphVectorStore(GraphVectorStore):
             nonlocal outgoing_links_map, visited_links, retrieved_docs
 
             results = (
-                await self.vector_store.asimilarity_search_with_embedding_id_by_vector(
+                await self.vector_store.asimilarity_search_with_embedding_by_vector(
                     embedding=query_embedding,
                     k=fetch_k,
                     filter=filter,
@@ -582,14 +582,15 @@ class CassandraGraphVectorStore(GraphVectorStore):
             )
 
             candidates: dict[str, list[float]] = {}
-            for doc, embedding, doc_id in results:
-                if doc_id not in retrieved_docs:
-                    retrieved_docs[doc_id] = doc
+            for doc in results:
+                if doc.id is not None:
+                    if doc.id not in retrieved_docs:
+                        retrieved_docs[doc.id] = doc
 
-                if doc_id not in outgoing_links_map:
-                    node = _doc_to_node(doc)
-                    outgoing_links_map[doc_id] = _outgoing_links(node=node)
-                    candidates[doc_id] = embedding
+                    if doc.id not in outgoing_links_map:
+                        node = _doc_to_node(doc)
+                        outgoing_links_map[doc.id] = _outgoing_links(node=node)
+                        candidates[doc.id] = doc.metadata["__embedding"]
             helper.add_candidates(candidates)
 
         if initial_roots:
@@ -980,22 +981,24 @@ class CassandraGraphVectorStore(GraphVectorStore):
             )
 
             tasks.append(
-                self.vector_store.asimilarity_search_with_embedding_id_by_vector(
+                self.vector_store.asimilarity_search_with_embedding_by_vector(
                     embedding=query_embedding,
                     k=k_per_link or 10,
                     filter=metadata_filter,
                 )
             )
 
-        results = await asyncio.gather(*tasks)
+        results: list[list[Document]] = await asyncio.gather(*tasks)
 
         for result in results:
-            for doc, embedding, doc_id in result:
-                if doc_id not in retrieved_docs:
-                    retrieved_docs[doc_id] = doc
-                if doc_id not in targets:
-                    node = _doc_to_node(doc=doc)
-                    targets[doc_id] = AdjacentNode(node=node, embedding=embedding)
+            for doc in result:
+                if doc.id is not None:
+                    if doc.id not in retrieved_docs:
+                        retrieved_docs[doc.id] = doc
+                    if doc.id not in targets:
+                        node = _doc_to_node(doc=doc)
+                        embedding = doc.metadata["__embedding"]
+                        targets[doc.id] = AdjacentNode(node=node, embedding=embedding)
 
         # TODO: Consider a combined limit based on the similarity and/or
         # predicated MMR score?

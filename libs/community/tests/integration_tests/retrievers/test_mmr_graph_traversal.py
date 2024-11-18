@@ -3,13 +3,14 @@
 import json
 import os
 from contextlib import contextmanager
-from typing import Any, Generator, Iterable, List
+from typing import Any, Generator, Iterable
 
 import pytest
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
+from pytest import FixtureRequest
 
 from langchain_community.retrievers import GraphMMRTraversalRetriever
 from langchain_community.retrievers.traversal_adapters import (
@@ -32,7 +33,7 @@ vector_store_types = [
 ]
 
 
-def _doc_ids(docs: Iterable[Document]) -> List[str]:
+def _doc_ids(docs: Iterable[Document]) -> set[str]:
     return {doc.id for doc in docs if doc.id is not None}
 
 
@@ -174,7 +175,7 @@ def get_cassandra_session(
 
 @pytest.fixture(scope="function")
 def vector_store(
-    request, embedding_type: str, vector_store_type: str
+    request: FixtureRequest, embedding_type: str, vector_store_type: str
 ) -> Generator[VectorStore, None, None]:
     embeddings: Embeddings
     if embedding_type == "angular-embeddings":
@@ -206,7 +207,7 @@ def vector_store(
             yield store
             store.delete_collection()
 
-        except ImportError or ModuleNotFoundError:
+        except (ImportError, ModuleNotFoundError):
             msg = (
                 "to test mmr-graph-traversal with AstraDB, please"
                 " install langchain-astradb and python-dotenv"

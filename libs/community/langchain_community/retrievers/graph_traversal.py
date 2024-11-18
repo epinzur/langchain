@@ -17,11 +17,12 @@ from langchain_community.vectorstores import OpenSearchVectorSearch
 
 
 class Edge:
-    direction: str = Literal["bi-dir", "in", "out"]
+    DIRECTION = Literal["bi-dir", "in", "out"]
+    direction: DIRECTION
     key: str
     value: Any
 
-    def __init__(self, direction: str, key: str, value: Any) -> None:
+    def __init__(self, direction: DIRECTION, key: str, value: Any) -> None:
         self.direction = direction
         self.key = key
         self.value = value
@@ -90,11 +91,11 @@ class ChromaWrapper(GraphVectorStore):
         ]
 
     @classmethod
-    def from_texts(self, *args: Any) -> Chroma:
-        return Chroma.from_texts(*args)
+    def from_texts(self, **kwargs: Any) -> Chroma:  # type: ignore
+        return Chroma.from_texts(**kwargs)
 
-    def similarity_search(self, *args: Any) -> List[Document]:
-        return self._vector_store.similarity_search(*args)
+    def similarity_search(self, **kwargs: Any) -> List[Document]:  # type: ignore
+        return self._vector_store.similarity_search(**kwargs)
 
     def __getattr__(self, name: str) -> Any:
         # Delegate attribute access to the underlying vector store
@@ -145,11 +146,11 @@ class OpenSearchWrapper(GraphVectorStore):
         return [self._hit_to_document(hit) for hit in results["hits"]["hits"]]
 
     @classmethod
-    def from_texts(self, *args: Any) -> OpenSearchVectorSearch:
-        return OpenSearchVectorSearch.from_texts(*args)
+    def from_texts(self, **kwargs: Any) -> OpenSearchVectorSearch:  # type: ignore
+        return OpenSearchVectorSearch.from_texts(**kwargs)
 
-    def similarity_search(self, *args: Any) -> List[Document]:
-        return self._vector_store.similarity_search(*args)
+    def similarity_search(self, **kwargs: Any) -> List[Document]:  # type: ignore
+        return self._vector_store.similarity_search(**kwargs)
 
     def __getattr__(self, name: str) -> Any:
         # Delegate attribute access to the underlying vector store
@@ -186,7 +187,7 @@ class GraphTraversalRetriever(BaseRetriever):
     edges: List[Union[str, Tuple[str, str]]]
     _edge_lookup: Dict[str, str] = PrivateAttr(default={})
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         for edge in self.edges:
             if isinstance(edge, str):
@@ -388,7 +389,7 @@ class GraphTraversalRetriever(BaseRetriever):
 
         return doc_cache.get_by_document_ids(doc_ids=visited_ids)
 
-    def _get_edges(self, direction: str, key: str, value: Any) -> set[Edge]:
+    def _get_edges(self, direction: Edge.DIRECTION, key: str, value: Any) -> set[Edge]:
         if isinstance(value, str):
             return {Edge(direction=direction, key=key, value=value)}
         elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):

@@ -41,16 +41,12 @@ NEG_INF = float("-inf")
 METADATA_EMBEDDING_KEY = "__embedding"
 
 
-def default(value: Any, fallback: Any) -> Any:
-    return value if value is not None else fallback
-
-
 @dataclasses.dataclass
 class EmbeddedDocument:
     doc: Document
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Edge):
+        if not isinstance(other, EmbeddedDocument):
             return NotImplemented
         return self.id == other.id
 
@@ -335,11 +331,12 @@ class MmrHelper:
 
 
 class Edge:
-    direction: str = Literal["bi-dir", "in", "out"]
+    DIRECTION = Literal["bi-dir", "in", "out"]
+    direction: DIRECTION
     key: str
     value: Any
 
-    def __init__(self, direction: str, key: str, value: Any) -> None:
+    def __init__(self, direction: DIRECTION, key: str, value: Any) -> None:
         self.direction = direction
         self.key = key
         self.value = value
@@ -373,7 +370,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
     score_threshold: float = float("-inf")
     _edge_lookup: Dict[str, str] = PrivateAttr(default={})
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         for edge in self.edges:
             if isinstance(edge, str):
@@ -435,12 +432,14 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             filter: Optional metadata to filter the results.
             **kwargs: Additional keyword arguments.
         """
-        k = default(k, self.k)
-        depth = default(depth, self.depth)
-        fetch_k = default(fetch_k, self.fetch_k)
-        adjacent_k = default(adjacent_k, self.adjacent_k)
-        lambda_mult = default(lambda_mult, self.lambda_mult)
-        score_threshold = default(score_threshold, self.score_threshold)
+        k = self.k if k is None else k
+        depth = self.depth if depth is None else depth
+        fetch_k = self.fetch_k if fetch_k is None else fetch_k
+        adjacent_k = self.adjacent_k if adjacent_k is None else adjacent_k
+        lambda_mult = self.lambda_mult if lambda_mult is None else lambda_mult
+        score_threshold = (
+            self.score_threshold if score_threshold is None else score_threshold
+        )
 
         # For each unselected node, stores the outgoing edges.
         outgoing_edges_map: dict[str, set[Edge]] = {}
@@ -628,12 +627,14 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             filter: Optional metadata to filter the results.
             **kwargs: Additional keyword arguments.
         """
-        k = default(k, self.k)
-        depth = default(depth, self.depth)
-        fetch_k = default(fetch_k, self.fetch_k)
-        adjacent_k = default(adjacent_k, self.adjacent_k)
-        lambda_mult = default(lambda_mult, self.lambda_mult)
-        score_threshold = default(score_threshold, self.score_threshold)
+        k = self.k if k is None else k
+        depth = self.depth if depth is None else depth
+        fetch_k = self.fetch_k if fetch_k is None else fetch_k
+        adjacent_k = self.adjacent_k if adjacent_k is None else adjacent_k
+        lambda_mult = self.lambda_mult if lambda_mult is None else lambda_mult
+        score_threshold = (
+            self.score_threshold if score_threshold is None else score_threshold
+        )
 
         # For each unselected node, stores the outgoing edges.
         outgoing_edges_map: dict[str, set[Edge]] = {}
@@ -897,7 +898,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             results.update({EmbeddedDocument(doc=doc) for doc in docs})
         return results
 
-    def _get_edges(self, direction: str, key: str, value: Any) -> set[Edge]:
+    def _get_edges(self, direction: Edge.DIRECTION, key: str, value: Any) -> set[Edge]:
         if isinstance(value, str):
             return {Edge(direction=direction, key=key, value=value)}
         elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):

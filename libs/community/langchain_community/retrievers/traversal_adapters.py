@@ -256,7 +256,7 @@ class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
 
 
 class AstraMMRTraversalAdapter(MMRTraversalAdapter):
-    def __init__(self, vector_store: ValueError):
+    def __init__(self, vector_store: VectorStore):
         try:
             from langchain_astradb import AstraDBVectorStore
         except (ImportError, ModuleNotFoundError):
@@ -353,7 +353,7 @@ class AstraMMRTraversalAdapter(MMRTraversalAdapter):
 
 
 class CassandraMMRTraversalAdapter(MMRTraversalAdapter):
-    def __init__(self, vector_store: ValueError):
+    def __init__(self, vector_store: VectorStore):
         from langchain_community.vectorstores import Cassandra
 
         self._vector_store = cast(Cassandra, vector_store)

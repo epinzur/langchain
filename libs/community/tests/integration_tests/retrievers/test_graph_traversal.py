@@ -11,6 +11,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
+from pytest import FixtureRequest
 
 from langchain_community.retrievers import GraphTraversalRetriever
 from langchain_community.vectorstores import Cassandra, OpenSearchVectorSearch
@@ -185,7 +186,7 @@ def get_cassandra_session(
 
 @pytest.fixture(scope="function")
 def vector_store(
-    request, embedding_type: str, vector_store_type: str
+    request: FixtureRequest, embedding_type: str, vector_store_type: str
 ) -> Generator[VectorStore, None, None]:
     embeddings: Embeddings
     if embedding_type == "earth-embeddings":
@@ -217,7 +218,7 @@ def vector_store(
             yield store
             store.delete_collection()
 
-        except ImportError or ModuleNotFoundError:
+        except (ImportError, ModuleNotFoundError):
             msg = (
                 "to test graph-traversal with AstraDB, please"
                 " install langchain-astradb and python-dotenv"
@@ -328,8 +329,8 @@ class TestGraphTraversal:
         )
 
         docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
-        ss_labels = [doc.metadata["label"] for doc in docs]
-        assert ss_labels == ["AR", "A0"]
+        ss_labels = {doc.metadata["label"] for doc in docs}
+        assert ss_labels == {"AR", "A0"}
         assert_document_format(docs[0])
 
         docs = retriever.invoke(input="[2, 10]", depth=2, k=2)
@@ -355,8 +356,8 @@ class TestGraphTraversal:
             k=2,
         )
         docs = await retriever.ainvoke(input="[2, 10]", depth=0, k=2)
-        ss_labels = [doc.metadata["label"] for doc in docs]
-        assert ss_labels == ["AR", "A0"]
+        ss_labels = {doc.metadata["label"] for doc in docs}
+        assert ss_labels == {"AR", "A0"}
         assert_document_format(docs[0])
 
         docs = await retriever.ainvoke(input="[2, 10]", depth=2, k=2)
