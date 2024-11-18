@@ -185,6 +185,7 @@ def vector_store(
         msg = f"Unknown embeddings type: {embedding_type}"
         raise ValueError(msg)
 
+    store: VectorStore
     if vector_store_type == "astra-db":
         try:
             from astrapy.authentication import StaticTokenProvider
@@ -206,7 +207,10 @@ def vector_store(
             store.delete_collection()
 
         except ImportError or ModuleNotFoundError:
-            msg = "to test graph-traversal with AstraDB, please install langchain-astradb and python-dotenv"
+            msg = (
+                "to test mmr-graph-traversal with AstraDB, please"
+                " install langchain-astradb and python-dotenv"
+            )
             raise ImportError(msg)
 
     elif vector_store_type == "cassandra":

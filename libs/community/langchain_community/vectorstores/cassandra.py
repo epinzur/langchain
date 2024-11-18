@@ -28,6 +28,7 @@ if typing.TYPE_CHECKING:
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
+from langchain_core.runnables import run_in_executor
 from langchain_core.vectorstores import VectorStore, VectorStoreRetriever
 
 from langchain_community.utilities.cassandra import SetupMode
@@ -543,7 +544,7 @@ class Cassandra(VectorStore):
             return None
         return self._row_to_document(row=row)
 
-    def get_by_ids(self, ids: Sequence[str], /) -> list[Document]:
+    def get_by_ids(self, ids: Sequence[str], /) -> List[Document]:
         """Get documents by their IDs.
 
         The returned documents are expected to have the ID field set to the ID of the
@@ -572,7 +573,7 @@ class Cassandra(VectorStore):
         raise NotImplementedError(msg)
 
     # Implementations should override this method to provide an async native version.
-    async def aget_by_ids(self, ids: Sequence[str], /) -> list[Document]:
+    async def aget_by_ids(self, ids: Sequence[str], /) -> List[Document]:
         """Async get documents by their IDs.
 
         The returned documents are expected to have the ID field set to the ID of the
@@ -632,7 +633,7 @@ class Cassandra(VectorStore):
         k: int = 4,
         filter: Optional[Dict[str, str]] = None,
         body_search: Optional[Union[str, List[str]]] = None,
-    ) -> tuple[list[float], list[Document]]:
+    ) -> tuple[List[float], List[Document]]:
         """Return docs most similar to the query with embedding.
 
         Also includes the query embedding vector.
@@ -664,7 +665,7 @@ class Cassandra(VectorStore):
         k: int = 4,
         filter: Optional[Dict[str, str]] = None,
         body_search: Optional[Union[str, List[str]]] = None,
-    ) -> tuple[list[float], list[Document]]:
+    ) -> tuple[List[float], List[Document]]:
         """Return docs most similar to the query with embedding.
 
         Also includes the query embedding vector.
@@ -727,7 +728,7 @@ class Cassandra(VectorStore):
         k: int = 4,
         filter: Optional[Dict[str, str]] = None,
         body_search: Optional[Union[str, List[str]]] = None,
-    ) -> List[Tuple[Document, List[float]]]:
+    ) -> List[Document]:
         """Return docs most similar to embedding vector.
 
         Args:

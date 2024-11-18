@@ -21,12 +21,12 @@ class Edge:
     key: str
     value: Any
 
-    def __init__(self, direction=str, key=str, value=Any):
+    def __init__(self, direction: str, key: str, value: Any) -> None:
         self.direction = direction
         self.key = key
         self.value = value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.direction}:{self.key}:{self.value}"
 
     def __eq__(self, other: object) -> bool:
@@ -394,9 +394,11 @@ class GraphTraversalRetriever(BaseRetriever):
         elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
             return {Edge(direction=direction, key=key, value=item) for item in value}
         else:
-            raise TypeError(
-                "Expected a string or an iterable of strings, but got an unsupported type."
+            msg = (
+                "Expected a string or an iterable of"
+                " strings, but got an unsupported type."
             )
+            raise TypeError(msg)
 
     def _get_outgoing_edges(self, doc: Document) -> set[Edge]:
         outgoing_edges = set()
@@ -446,7 +448,6 @@ class GraphTraversalRetriever(BaseRetriever):
                     if d < depth:
                         # Record any new (or newly discovered at a lower depth)
                         # edges to the set to traverse.
-                        edges = self._get_outgoing_edges(doc=node)
                         for edge in self._get_outgoing_edges(doc=node):
                             if d <= visited_edges.get(edge, depth):
                                 # Record that we'll query this edge at the

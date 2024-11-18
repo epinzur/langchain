@@ -1,6 +1,5 @@
 import asyncio
 import dataclasses
-from abc import abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -9,28 +8,18 @@ from typing import (
     Iterable,
     List,
     Literal,
-    Optional,
     Sequence,
     Tuple,
     Union,
-    cast,
 )
 
 import numpy as np
-from langchain_chroma import Chroma
-from langchain_core.callbacks.manager import (
-    AsyncCallbackManagerForRetrieverRun,
-    CallbackManagerForRetrieverRun,
-)
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
-from langchain_core.runnables.config import run_in_executor
-from langchain_core.vectorstores import VectorStore
 from numpy.typing import NDArray
-from pydantic import BaseModel, PrivateAttr
+from pydantic import PrivateAttr
 
 from langchain_community.utils.math import cosine_similarity
-from langchain_community.vectorstores import OpenSearchVectorSearch
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -52,7 +41,7 @@ NEG_INF = float("-inf")
 METADATA_EMBEDDING_KEY = "__embedding"
 
 
-def default(value, fallback):
+def default(value: Any, fallback: Any) -> Any:
     return value if value is not None else fallback
 
 
@@ -180,8 +169,6 @@ class MmrHelper:
         self.score_threshold = score_threshold
 
         self.selected_ids = []
-        self.selected_similarity_scores = []
-        self.selected_mmr_scores = []
 
         # List of selected embeddings (in selection order).
         self.selected_embeddings = np.ndarray((k, self.dimensions), dtype=np.float32)
@@ -352,12 +339,12 @@ class Edge:
     key: str
     value: Any
 
-    def __init__(self, direction=str, key=str, value=Any):
+    def __init__(self, direction: str, key: str, value: Any) -> None:
         self.direction = direction
         self.key = key
         self.value = value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.direction}:{self.key}:{self.value}"
 
     def __eq__(self, other: object) -> bool:
@@ -916,9 +903,11 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
             return {Edge(direction=direction, key=key, value=item) for item in value}
         else:
-            raise TypeError(
-                "Expected a string or an iterable of strings, but got an unsupported type."
+            msg = (
+                "Expected a string or an iterable of"
+                " strings, but got an unsupported type."
             )
+            raise TypeError(msg)
 
     def _get_outgoing_edges(self, doc: EmbeddedDocument) -> set[Edge]:
         outgoing_edges = set()

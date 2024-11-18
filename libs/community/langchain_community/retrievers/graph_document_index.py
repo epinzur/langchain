@@ -1,27 +1,14 @@
-import asyncio
 from abc import abstractmethod
 from typing import (
     Any,
-    Dict,
     Iterable,
-    Iterator,
-    List,
     Literal,
-    Tuple,
-    Union,
-    cast,
-    override,
 )
 
-from langchain_core.callbacks.manager import (
-    AsyncCallbackManagerForRetrieverRun,
-    CallbackManagerForRetrieverRun,
-)
 from langchain_core.documents import Document
-from langchain_core.indexing import DocumentIndex
 from langchain_core.runnables.config import run_in_executor
 from langchain_core.vectorstores import VectorStore
-from pydantic import BaseModel, PrivateAttr
+from typing_extensions import override
 
 
 class Edge:
@@ -29,12 +16,12 @@ class Edge:
     key: str
     value: Any
 
-    def __init__(self, direction=str, key=str, value=Any):
+    def __init__(self, direction: str, key: str, value: Any) -> None:
         self.direction = direction
         self.key = key
         self.value = value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.direction}:{self.key}:{self.value}"
 
 
@@ -77,7 +64,7 @@ class GraphVectorStore(VectorStore):
         return await run_in_executor(None, self.metadata_search, filter, n)
 
     @override
-    def add_documents(self, documents, **kwargs):
+    def add_documents(self, documents: list[Document], **kwargs: Any) -> list[str]:
         if self.use_metadata_expansion:
             # pre-insertion, expand all list metadata fields
             # remove on return to user
@@ -91,5 +78,7 @@ class GraphVectorStore(VectorStore):
         return super().add_documents(documents, **kwargs)
 
     @override
-    async def aadd_documents(self, documents, **kwargs):
+    async def aadd_documents(
+        self, documents: list[Document], **kwargs: Any
+    ) -> list[str]:
         return await super().aadd_documents(documents, **kwargs)
