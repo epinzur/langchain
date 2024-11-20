@@ -13,7 +13,7 @@ from langchain_core.vectorstores import VectorStore
 from pytest import FixtureRequest
 
 from langchain_community.retrievers import GraphMMRTraversalRetriever
-from langchain_community.retrievers.traversal_adapters import (
+from langchain_community.retrievers.graph_mmr_traversal import (
     AstraMMRTraversalAdapter,
     CassandraMMRTraversalAdapter,
     ChromaMMRTraversalAdapter,
