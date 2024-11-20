@@ -14,6 +14,13 @@ from langchain_core.vectorstores import VectorStore
 from pytest import FixtureRequest
 
 from langchain_community.retrievers import GraphTraversalRetriever
+from langchain_community.retrievers.graph_traversal import (
+    AstraTraversalAdapter,
+    CassandraTraversalAdapter,
+    ChromaTraversalAdapter,
+    OpenSearchTraversalAdapter,
+    TraversalAdapter,
+)
 from langchain_community.vectorstores import Cassandra, OpenSearchVectorSearch
 
 vector_store_types = [
@@ -245,9 +252,24 @@ def vector_store(
             opensearch_url="http://localhost:9200",
             index_name="graph_test_index",
             embedding_function=embeddings,
+            engine="faiss",
         )
         yield store
         store.delete_index()  # store.index_name
+    else:
+        msg = f"Unknown vector store type: {vector_store_type}"
+        raise ValueError(msg)
+
+
+def get_adapter(vector_store: VectorStore, vector_store_type: str) -> TraversalAdapter:
+    if vector_store_type == "astra-db":
+        return AstraTraversalAdapter(vector_store=vector_store)
+    elif vector_store_type == "cassandra":
+        return CassandraTraversalAdapter(vector_store=vector_store)
+    elif vector_store_type == "chroma-db":
+        return ChromaTraversalAdapter(vector_store=vector_store)
+    elif vector_store_type == "open-search":
+        return OpenSearchTraversalAdapter(vector_store=vector_store)
     else:
         msg = f"Unknown vector store type: {vector_store_type}"
         raise ValueError(msg)
@@ -260,6 +282,7 @@ def vector_store(
 @pytest.mark.parametrize("embedding_type", ["earth-embeddings"])
 def test_traversal(
     vector_store: VectorStore,
+    vector_store_type: str,
 ) -> None:
     greetings = Document(
         id="greetings",
@@ -280,22 +303,27 @@ def test_traversal(
         page_content="Hello Earth",
         metadata={"outgoing": "parent", "keywords": ["greeting", "earth"]},
     )
-    vector_store.add_documents([greetings, doc1, doc2])
+    vector_store.add_documents([greetings, doc1, doc2], engine="faiss")
+
+    vector_store_adapter = get_adapter(
+        vector_store=vector_store,
+        vector_store_type=vector_store_type,
+    )
 
     retriever = GraphTraversalRetriever(
-        vector_store=vector_store,
+        vector_store_adapter=vector_store_adapter,
         edges=[("outgoing", "incoming"), "keywords"],
-        k=2,
+        start_k=2,
         depth=2,
     )
 
-    docs = retriever.invoke("Earth", k=1, depth=0)
+    docs = retriever.invoke("Earth", start_k=1, depth=0)
     assert _doc_ids(docs) == ["doc2"]
 
-    docs = retriever.invoke("Earth", k=2, depth=0)
+    docs = retriever.invoke("Earth", depth=0)
     assert _doc_ids(docs) == ["doc2", "doc1"]
 
-    docs = retriever.invoke("Earth", k=1, depth=1)
+    docs = retriever.invoke("Earth", start_k=1, depth=1)
     assert set(_doc_ids(docs)) == {"doc2", "doc1", "greetings"}
 
 
@@ -317,23 +345,30 @@ class TestGraphTraversal:
     def test_invoke_sync(
         self,
         vector_store: VectorStore,
+        vector_store_type: str,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Graph traversal search on a vector store."""
-        vector_store.add_documents(graph_vector_store_docs)
-        retriever = GraphTraversalRetriever(
+        vector_store.add_documents(graph_vector_store_docs, engine="faiss")
+
+        vector_store_adapter = get_adapter(
             vector_store=vector_store,
-            edges=[("out", "in"), "tag"],
-            depth=2,
-            k=2,
+            vector_store_type=vector_store_type,
         )
 
-        docs = retriever.invoke(input="[2, 10]", depth=0, k=2)
+        retriever = GraphTraversalRetriever(
+            vector_store_adapter=vector_store_adapter,
+            edges=[("out", "in"), "tag"],
+            depth=2,
+            start_k=2,
+        )
+
+        docs = retriever.invoke(input="[2, 10]", depth=0)
         ss_labels = {doc.metadata["label"] for doc in docs}
         assert ss_labels == {"AR", "A0"}
         assert_document_format(docs[0])
 
-        docs = retriever.invoke(input="[2, 10]", depth=2, k=2)
+        docs = retriever.invoke(input="[2, 10]")
         # this is a set, as some of the internals of trav.search are set-driven
         # so ordering is not deterministic:
         ts_labels = {doc.metadata["label"] for doc in docs}
@@ -345,22 +380,29 @@ class TestGraphTraversal:
     async def test_invoke_async(
         self,
         vector_store: VectorStore,
+        vector_store_type: str,
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Graph traversal search on a graph store."""
-        await vector_store.aadd_documents(graph_vector_store_docs)
-        retriever = GraphTraversalRetriever(
+        await vector_store.aadd_documents(graph_vector_store_docs, engine="faiss")
+
+        vector_store_adapter = get_adapter(
             vector_store=vector_store,
+            vector_store_type=vector_store_type,
+        )
+
+        retriever = GraphTraversalRetriever(
+            vector_store_adapter=vector_store_adapter,
             edges=[("out", "in"), "tag"],
             depth=2,
-            k=2,
+            start_k=2,
         )
-        docs = await retriever.ainvoke(input="[2, 10]", depth=0, k=2)
+        docs = await retriever.ainvoke(input="[2, 10]", depth=0)
         ss_labels = {doc.metadata["label"] for doc in docs}
         assert ss_labels == {"AR", "A0"}
         assert_document_format(docs[0])
 
-        docs = await retriever.ainvoke(input="[2, 10]", depth=2, k=2)
+        docs = await retriever.ainvoke(input="[2, 10]")
         ss_labels = {doc.metadata["label"] for doc in docs}
         assert ss_labels == {"AR", "A0", "BR", "B0", "TR", "T0"}
         assert_document_format(docs[0])

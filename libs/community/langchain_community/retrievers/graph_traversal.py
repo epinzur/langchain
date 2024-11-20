@@ -1,19 +1,129 @@
 import asyncio
 from abc import abstractmethod
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
-
-from langchain_chroma import Chroma
-from langchain_core.callbacks.manager import (
-    AsyncCallbackManagerForRetrieverRun,
-    CallbackManagerForRetrieverRun,
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    cast,
 )
-from langchain_core.documents import Document
-from langchain_core.retrievers import BaseRetriever
-from langchain_core.runnables.config import run_in_executor
-from langchain_core.vectorstores import VectorStore
-from pydantic import PrivateAttr
 
-from langchain_community.vectorstores import OpenSearchVectorSearch
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.runnables import run_in_executor
+from langchain_core.vectorstores import VectorStore
+from pydantic import Field, PrivateAttr
+
+
+class TraversalAdapter:
+    _base_vector_store: VectorStore
+
+    @property
+    def _safe_embedding(self) -> Embeddings:
+        if not self._base_vector_store.embeddings:
+            msg = "Missing embedding"
+            raise ValueError(msg)
+        return self._base_vector_store.embeddings
+
+    def similarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> Tuple[List[float], List[Document]]:
+        """Return docs most similar to query.
+
+        Also returns the embedded query vector.
+
+        Args:
+            query: Input text.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            **kwargs: Arguments to pass to the search method.
+
+        Returns:
+            List of Documents most similar to the query.
+        """
+        query_embedding = self._safe_embedding.embed_query(text=query)
+        docs = self.similarity_search_by_vector(
+            embedding=query_embedding,
+            k=k,
+            filter=filter,
+            **kwargs,
+        )
+        return query_embedding, docs
+
+    async def asimilarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> Tuple[List[float], List[Document]]:
+        """Return docs most similar to query.
+
+        Also returns the embedded query vector.
+
+        Args:
+            query: Input text.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            **kwargs: Arguments to pass to the search method.
+
+        Returns:
+            List of Documents most similar to the query.
+        """
+        return await run_in_executor(
+            None, self.similarity_search, query, k, filter, **kwargs
+        )
+
+    @abstractmethod
+    def similarity_search_by_vector(
+        self,
+        embedding: list[float],
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> list[Document]:
+        """Return docs most similar to embedding vector.
+
+        Args:
+            embedding: Embedding to look up documents similar to.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            **kwargs: Arguments to pass to the search method.
+
+        Returns:
+            List of Documents most similar to the query vector.
+        """
+
+    async def asimilarity_search_by_vector(
+        self,
+        embedding: list[float],
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> list[Document]:
+        """Async return docs most similar to embedding vector.
+
+        Args:
+            embedding: Embedding to look up documents similar to.
+            k: Number of Documents to return. Defaults to 4.
+            filter: Filter on the metadata to apply.
+            **kwargs: Arguments to pass to the search method.
+
+        Returns:
+            List of Documents most similar to the query vector.
+        """
+        return await run_in_executor(
+            None, self.similarity_search_by_vector, embedding, k, filter, **kwargs
+        )
 
 
 class Edge:
@@ -43,126 +153,14 @@ class Edge:
         return hash((self.direction, self.key, self.value))
 
 
-class GraphVectorStore(VectorStore):
-    @abstractmethod
-    def metadata_search(
-        self,
-        filter: dict[str, Any] | None = None,  # noqa: A002
-        n: int = 5,
-    ) -> Iterable[Document]:
-        """Get document nodes via a metadata search.
-
-        Args:
-            filter: the metadata to query for.
-            n: the maximum number of documents to return.
-        """
-
-    async def ametadata_search(
-        self,
-        filter: dict[str, Any] | None = None,  # noqa: A002
-        n: int = 5,
-    ) -> Iterable[Document]:
-        """Get document nodes via a metadata search.
-
-        Args:
-            filter: the metadata to query for.
-            n: the maximum number of documents to return.
-        """
-        return await run_in_executor(None, self.metadata_search, filter, n)
-
-
-class ChromaWrapper(GraphVectorStore):
-    def __init__(self, vector_store: Chroma):
-        self._vector_store = vector_store
-
-    def metadata_search(
-        self,
-        filter: dict[str, Any] | None = None,  # noqa: A002
-        n: int = 5,
-    ) -> Iterable[Document]:
-        results = self._vector_store.get(where=filter, limit=n)
-        return [
-            Document(page_content=result[0], metadata=result[1] or {}, id=result[2])
-            for result in zip(
-                results["documents"],
-                results["metadatas"],
-                results["ids"],
-            )
-        ]
-
-    @classmethod
-    def from_texts(self, **kwargs: Any) -> Chroma:  # type: ignore
-        return Chroma.from_texts(**kwargs)
-
-    def similarity_search(self, **kwargs: Any) -> List[Document]:  # type: ignore
-        return self._vector_store.similarity_search(**kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        # Delegate attribute access to the underlying vector store
-        return getattr(self._vector_store, name)
-
-
-class OpenSearchWrapper(GraphVectorStore):
-    def __init__(self, vector_store: OpenSearchVectorSearch):
-        self._vector_store = vector_store
-
-    def _hit_to_document(self, hit: Any) -> Document:
-        return Document(
-            page_content=hit["_source"]["text"],
-            metadata=hit["_source"]["metadata"],
-            id=hit["_id"],
-        )
-
-    def _build_filter(
-        self, filter: Optional[Dict[str, str]] = None
-    ) -> List[Dict[str, Any]] | None:
-        if filter is None:
-            return None
-        return [
-            {
-                "terms" if isinstance(value, list) else "term": {
-                    f"metadata.{key}.keyword": value
-                }
-            }
-            for key, value in filter.items()
-        ]
-
-    def metadata_search(
-        self,
-        filter: dict[str, Any] | None = None,  # noqa: A002
-        n: int = 5,
-    ) -> Iterable[Document]:
-        body = {
-            "_source": ["text", "metadata"],
-            "query": {"bool": {"must": self._build_filter(filter=filter)}},
-            "size": n,
-        }
-
-        results = self._vector_store.client.search(
-            index=self._vector_store.index_name,
-            body=body,
-        )
-
-        return [self._hit_to_document(hit) for hit in results["hits"]["hits"]]
-
-    @classmethod
-    def from_texts(self, **kwargs: Any) -> OpenSearchVectorSearch:  # type: ignore
-        return OpenSearchVectorSearch.from_texts(**kwargs)
-
-    def similarity_search(self, **kwargs: Any) -> List[Document]:  # type: ignore
-        return self._vector_store.similarity_search(**kwargs)
-
-    def __getattr__(self, name: str) -> Any:
-        # Delegate attribute access to the underlying vector store
-        return getattr(self._vector_store, name)
-
-
 class DocumentCache:
     documents: dict[str, Document] = {}
 
     def add_document(self, doc: Document) -> None:
-        if doc.id is not None:
-            self.documents[doc.id] = doc
+        if doc.id is None:
+            msg = "All documents should have ids"
+            raise ValueError(msg)
+        self.documents[doc.id] = doc
 
     def add_documents(self, docs: Iterable[Document]) -> None:
         for doc in docs:
@@ -170,21 +168,25 @@ class DocumentCache:
 
     def get_by_document_ids(
         self,
-        doc_ids: Iterable[str],
+        ids: Iterable[str],
     ) -> list[Document]:
         docs: list[Document] = []
-        for doc_id in doc_ids:
-            if doc_id in self.documents:
-                docs.append(self.documents[doc_id])
+        for id in ids:
+            if id in self.documents:
+                docs.append(self.documents[id])
             else:
-                msg = f"unexpected, cache should contain id: {doc_id}"
+                msg = f"unexpected, cache should contain id: {id}"
                 raise RuntimeError(msg)
         return docs
 
 
+# this class uses pydantic, so vector_store_adapter and edges
+# must be provided at init time.
 class GraphTraversalRetriever(BaseRetriever):
-    vector_store: VectorStore
+    vector_store_adapter: TraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
+    start_k: int = Field(default=4)
+    depth: int = Field(default=4)
     _edge_lookup: Dict[str, str] = PrivateAttr(default={})
 
     def __init__(self, **kwargs: Any):
@@ -203,37 +205,30 @@ class GraphTraversalRetriever(BaseRetriever):
                     "Invalid type for edge. must be 'str' or 'tuple[str,str]'"
                 )
 
-    @property
-    def _graph_vector_store(self) -> GraphVectorStore:
-        if isinstance(self.vector_store, Chroma):
-            return ChromaWrapper(vector_store=self.vector_store)
-        elif isinstance(self.vector_store, OpenSearchVectorSearch):
-            return OpenSearchWrapper(vector_store=self.vector_store)
-        return cast(GraphVectorStore, self.vector_store)
-
     def _get_relevant_documents(
         self,
         query: str,
         *,
-        run_manager: CallbackManagerForRetrieverRun,
-        k: int = 4,
-        depth: int = 1,
+        start_k: int | None = None,
+        depth: int | None = None,
         filter: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> list[Document]:
         """Get documents relevant to a query.
 
         Args:
             query: String to find relevant documents for.
             run_manager: The callback handler to use.
-            k: The number of Documents to return from the initial vector search.
+            start_k: The number of Documents to return from the initial vector search.
                 Defaults to 4.
             depth: The maximum depth of edges to traverse. Defaults to 1.
             filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
         Returns:
             List of relevant documents.
         """
         # Depth 0:
-        #   Query for `k` document nodes similar to the question.
+        #   Query for `start_k` document nodes similar to the question.
         #   Retrieve `id` and `outgoing_edges`.
         #
         # Depth 1:
@@ -242,6 +237,8 @@ class GraphTraversalRetriever(BaseRetriever):
         #   Query for `outgoing_edges` of those "new" node IDs.
         #
         # ...
+        start_k = self.start_k if start_k is None else start_k
+        depth = self.depth if depth is None else depth
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}
@@ -250,6 +247,9 @@ class GraphTraversalRetriever(BaseRetriever):
         visited_edges: dict[Edge, int] = {}
 
         doc_cache = DocumentCache()
+
+        # this gets set after the call to get the initial nodes
+        query_embedding: list[float] = []
 
         def visit_nodes(d: int, nodes: Iterable[Document]) -> None:
             """Recursively visit document nodes and their outgoing edges."""
@@ -269,8 +269,11 @@ class GraphTraversalRetriever(BaseRetriever):
                     )
 
                     docs = list(
-                        self._graph_vector_store.metadata_search(
-                            filter=metadata_filter, n=1000
+                        self.vector_store_adapter.similarity_search_by_vector(
+                            embedding=query_embedding,
+                            k=1000,
+                            filter=metadata_filter,
+                            **kwargs,
                         )
                     )
                     doc_cache.add_documents(docs)
@@ -282,45 +285,45 @@ class GraphTraversalRetriever(BaseRetriever):
                                 new_ids_at_next_depth.add(doc.id)
 
                     if new_ids_at_next_depth:
-                        nodes = doc_cache.get_by_document_ids(
-                            doc_ids=new_ids_at_next_depth
-                        )
+                        nodes = doc_cache.get_by_document_ids(ids=new_ids_at_next_depth)
                         visit_nodes(d=d + 1, nodes=nodes)
 
         # Start the traversal
-        initial_nodes = self.vector_store.similarity_search(
+        query_embedding, initial_nodes = self.vector_store_adapter.similarity_search(
             query=query,
-            k=k,
+            k=start_k,
             filter=filter,
+            **kwargs,
         )
         doc_cache.add_documents(docs=initial_nodes)
         visit_nodes(d=0, nodes=initial_nodes)
 
-        return doc_cache.get_by_document_ids(doc_ids=visited_ids)
+        return doc_cache.get_by_document_ids(ids=visited_ids)
 
     async def _aget_relevant_documents(
         self,
         query: str,
         *,
-        run_manager: AsyncCallbackManagerForRetrieverRun,
-        k: int = 4,
-        depth: int = 1,
+        start_k: int | None = None,
+        depth: int | None = None,
         filter: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> list[Document]:
         """Asynchronously get documents relevant to a query.
 
         Args:
             query: String to find relevant documents for.
             run_manager: The callback handler to use.
-            k: The number of Documents to return from the initial vector search.
+            start_k: The number of Documents to return from the initial vector search.
                 Defaults to 4.
             depth: The maximum depth of edges to traverse. Defaults to 1.
             filter: Optional metadata to filter the results.
+            **kwargs: Additional keyword arguments.
         Returns:
             List of relevant documents
         """
         # Depth 0:
-        #   Query for `k` document nodes similar to the question.
+        #   Query for `start_k` document nodes similar to the question.
         #   Retrieve `content_id` and `outgoing_edges()`.
         #
         # Depth 1:
@@ -329,6 +332,8 @@ class GraphTraversalRetriever(BaseRetriever):
         #   Query for `outgoing_edges()` of those "new" node IDs.
         #
         # ...
+        start_k = self.start_k if start_k is None else start_k
+        depth = self.depth if depth is None else depth
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}
@@ -337,6 +342,9 @@ class GraphTraversalRetriever(BaseRetriever):
         visited_edges: dict[Edge, int] = {}
 
         doc_cache = DocumentCache()
+
+        # this gets set after the call to get the initial nodes
+        query_embedding: list[float] = []
 
         async def visit_nodes(d: int, nodes: Iterable[Document]) -> None:
             """Recursively visit document nodes and their outgoing edges."""
@@ -351,11 +359,13 @@ class GraphTraversalRetriever(BaseRetriever):
             if _outgoing_edges:
                 metadata_search_tasks = [
                     asyncio.create_task(
-                        self._graph_vector_store.ametadata_search(
+                        self.vector_store_adapter.asimilarity_search_by_vector(
+                            embedding=query_embedding,
+                            k=1000,
                             filter=self._get_metadata_filter(
                                 metadata=filter, outgoing_edge=outgoing_edge
                             ),
-                            n=1000,
+                            **kwargs,
                         )
                     )
                     for outgoing_edge in _outgoing_edges
@@ -373,21 +383,23 @@ class GraphTraversalRetriever(BaseRetriever):
                                 new_ids_at_next_depth.add(doc.id)
 
                     if new_ids_at_next_depth:
-                        nodes = doc_cache.get_by_document_ids(
-                            doc_ids=new_ids_at_next_depth
-                        )
+                        nodes = doc_cache.get_by_document_ids(ids=new_ids_at_next_depth)
                         await visit_nodes(d=d + 1, nodes=nodes)
 
         # Start the traversal
-        initial_nodes = await self.vector_store.asimilarity_search(
+        (
+            query_embedding,
+            initial_nodes,
+        ) = await self.vector_store_adapter.asimilarity_search(
             query=query,
-            k=k,
+            k=start_k,
             filter=filter,
+            **kwargs,
         )
         doc_cache.add_documents(docs=initial_nodes)
         await visit_nodes(d=0, nodes=initial_nodes)
 
-        return doc_cache.get_by_document_ids(doc_ids=visited_ids)
+        return doc_cache.get_by_document_ids(ids=visited_ids)
 
     def _get_edges(self, direction: Edge.DIRECTION, key: str, value: Any) -> set[Edge]:
         if isinstance(value, str):
@@ -483,3 +495,182 @@ class GraphTraversalRetriever(BaseRetriever):
             metadata_filter[in_key] = outgoing_edge.value
 
         return metadata_filter
+
+
+class AstraTraversalAdapter(TraversalAdapter):
+    def __init__(self, vector_store: VectorStore):
+        try:
+            from langchain_astradb import AstraDBVectorStore
+        except (ImportError, ModuleNotFoundError):
+            msg = "please `pip install langchain-astradb`"
+            raise ImportError(msg)
+
+        self._vector_store = cast(AstraDBVectorStore, vector_store)
+
+    def _build_docs(
+        self, docs_with_embeddings: list[tuple[Document, list[float]]]
+    ) -> List[Document]:
+        docs: List[Document] = []
+        for doc, _ in docs_with_embeddings:
+            docs.append(doc)
+        return docs
+
+    def similarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> Tuple[List[float], List[Document]]:
+        """Returns docs most similar to the query."""
+        query_embedding, docs_with_embeddings = (
+            self._vector_store.similarity_search_with_embedding(
+                query=query,
+                k=k,
+                filter=filter,
+                **kwargs,
+            )
+        )
+        docs = [doc for doc, _ in docs_with_embeddings]
+        return query_embedding, docs
+
+    async def asimilarity_search(
+        self,
+        query: str,
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> Tuple[List[float], List[Document]]:
+        """Returns docs most similar to the query."""
+        (
+            query_embedding,
+            docs_with_embeddings,
+        ) = await self._vector_store.asimilarity_search_with_embedding(
+            query=query,
+            k=k,
+            filter=filter,
+            **kwargs,
+        )
+        docs = [doc for doc, _ in docs_with_embeddings]
+        return query_embedding, docs
+
+    def similarity_search_by_vector(
+        self,
+        embedding: List[float],
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> List[Document]:
+        """Returns docs most similar to the query vector."""
+        docs_with_embeddings = (
+            self._vector_store.similarity_search_with_embedding_by_vector(
+                embedding=embedding,
+                k=k,
+                filter=filter,
+                **kwargs,
+            )
+        )
+        return [doc for doc, _ in docs_with_embeddings]
+
+    async def asimilarity_search_by_vector(
+        self,
+        embedding: List[float],
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> List[Document]:
+        """Returns docs most similar to the query vector."""
+        docs_with_embeddings = (
+            await self._vector_store.asimilarity_search_with_embedding_by_vector(
+                embedding=embedding,
+                k=k,
+                filter=filter,
+                **kwargs,
+            )
+        )
+        return [doc for doc, _ in docs_with_embeddings]
+
+
+class CassandraTraversalAdapter(TraversalAdapter):
+    def __init__(self, vector_store: VectorStore):
+        from langchain_community.vectorstores import Cassandra
+
+        self._vector_store = cast(Cassandra, vector_store)
+        self._base_vector_store = vector_store
+
+    def similarity_search_by_vector(  # type: ignore
+        self, **kwargs: Any
+    ) -> List[Document]:
+        return self._vector_store.similarity_search_by_vector(**kwargs)
+
+    async def asimilarity_search_by_vector(  # type: ignore
+        self, **kwargs: Any
+    ) -> List[Document]:
+        return await self._vector_store.asimilarity_search_by_vector(**kwargs)
+
+
+class ChromaTraversalAdapter(TraversalAdapter):
+    def __init__(self, vector_store: VectorStore):
+        try:
+            from langchain_chroma import Chroma
+        except (ImportError, ModuleNotFoundError):
+            msg = "please `pip install langchain-chroma`"
+            raise ImportError(msg)
+        self._vector_store = cast(Chroma, vector_store)
+        self._base_vector_store = vector_store
+
+    def similarity_search_by_vector(  # type: ignore
+        self, **kwargs: Any
+    ) -> List[Document]:
+        return self._vector_store.similarity_search_by_vector(**kwargs)
+
+
+class OpenSearchTraversalAdapter(TraversalAdapter):
+    def __init__(self, vector_store: VectorStore):
+        from langchain_community.vectorstores import OpenSearchVectorSearch
+
+        self._base_vector_store = vector_store
+        self._vector_store = cast(OpenSearchVectorSearch, vector_store)
+        if self._vector_store.engine not in ["lucene", "faiss"]:
+            msg = (
+                f"Invalid engine for Traversal: '{self._vector_store.engine}'"
+                " please instantiate the Open Search Vector Store with"
+                " either the 'lucene' or 'faiss' engine"
+            )
+            raise ValueError(msg)
+
+    def _build_filter(
+        self, filter: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]] | None:
+        if filter is None:
+            return None
+        return [
+            {
+                "terms" if isinstance(value, list) else "term": {
+                    f"metadata.{key}.keyword": value
+                }
+            }
+            for key, value in filter.items()
+        ]
+
+    def similarity_search_by_vector(
+        self,
+        embedding: List[float],
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> List[Document]:
+        """Returns docs (with embeddings) most similar to the query vector."""
+        if filter is not None:
+            # use an efficient_filter to collect results that
+            # are near the embedding vector until up to 'k'
+            # documents that match the filter are found.
+            kwargs["efficient_filter"] = {
+                "bool": {"must": self._build_filter(filter=filter)}
+            }
+
+        return self._vector_store.similarity_search_by_vector(
+            embedding=embedding,
+            k=k,
+            **kwargs,
+        )

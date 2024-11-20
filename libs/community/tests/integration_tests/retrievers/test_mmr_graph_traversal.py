@@ -234,7 +234,7 @@ def vector_store(
             opensearch_url="http://localhost:9200",
             index_name="graph_test_index",
             embedding_function=embeddings,
-            engine="lucene",
+            engine="faiss",
         )
         yield store
         store.delete_index()  # store.index_name

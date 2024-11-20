@@ -22,7 +22,7 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import run_in_executor
 from langchain_core.vectorstores import VectorStore
 from numpy.typing import NDArray
-from pydantic import PrivateAttr
+from pydantic import Field, PrivateAttr
 
 from langchain_community.utils.math import cosine_similarity
 
@@ -55,7 +55,7 @@ class MMRTraversalAdapter:
         Also returns the embedded query vector.
 
         Args:
-            embedding: Embedding to look up documents similar to.
+            query: Input text.
             k: Number of Documents to return. Defaults to 4.
             filter: Filter on the metadata to apply.
             **kwargs: Additional keyword arguments.
@@ -88,7 +88,7 @@ class MMRTraversalAdapter:
         Also returns the embedded query vector.
 
         Args:
-            embedding: Embedding to look up documents similar to.
+            query: Input text.
             k: Number of Documents to return. Defaults to 4.
             filter: Filter on the metadata to apply.
             **kwargs: Additional keyword arguments.
@@ -543,12 +543,12 @@ class Edge:
 class GraphMMRTraversalRetriever(BaseRetriever):
     vector_store_adapter: MMRTraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
-    k: int = 4
-    depth: int = 2
-    fetch_k: int = 100
-    adjacent_k: int = 10
-    lambda_mult: float = 0.5
-    score_threshold: float = float("-inf")
+    k: int = Field(default=4)
+    depth: int = Field(default=2)
+    fetch_k: int = Field(default=100)
+    adjacent_k: int = Field(default=10)
+    lambda_mult: float = Field(default=0.5)
+    score_threshold: float = Field(default=float("-inf"))
     _edge_lookup: Dict[str, str] = PrivateAttr(default={})
 
     def __init__(self, **kwargs: Any) -> None:
