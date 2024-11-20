@@ -1,6 +1,6 @@
-from abc import abstractmethod
 import asyncio
 import dataclasses
+from abc import abstractmethod
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 
 METADATA_EMBEDDING_KEY = "__embedding"
 NEG_INF = float("-inf")
+
 
 class MMRTraversalAdapter:
     _base_vector_store: VectorStore
@@ -214,7 +215,6 @@ class MMRTraversalAdapter:
         )
 
 
-
 @dataclasses.dataclass
 class EmbeddedDocument:
     doc: Document
@@ -273,11 +273,13 @@ class _Candidate:
             self.weighted_redundancy = new_weighted_redundancy
             self.score = self.weighted_similarity - self.weighted_redundancy
 
+
 def _emb_to_ndarray(embedding: list[float]) -> NDArray[np.float32]:
     emb_array = np.array(embedding, dtype=np.float32)
     if emb_array.ndim == 1:
         emb_array = np.expand_dims(emb_array, axis=0)
     return emb_array
+
 
 class MmrHelper:
     """Helper for executing an MMR traversal query.
@@ -1131,6 +1133,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
 
         return metadata_filter
 
+
 class AstraMMRTraversalAdapter(MMRTraversalAdapter):
     def __init__(self, vector_store: VectorStore):
         try:
@@ -1454,5 +1457,3 @@ class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
             except NotFoundError:
                 pass
         return docs
-
-
