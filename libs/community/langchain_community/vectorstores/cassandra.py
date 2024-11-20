@@ -28,7 +28,6 @@ if typing.TYPE_CHECKING:
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
-from langchain_core.runnables import run_in_executor
 from langchain_core.vectorstores import VectorStore, VectorStoreRetriever
 
 from langchain_community.utilities.cassandra import SetupMode
