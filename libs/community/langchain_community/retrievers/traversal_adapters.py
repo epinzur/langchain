@@ -4,6 +4,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Sequence,
     Tuple,
     cast,
 )
@@ -139,6 +140,65 @@ class MMRTraversalAdapter:
             **kwargs,
         )
 
+    @abstractmethod
+    def get(
+        self,
+        ids: Sequence[str],
+        /,
+        **kwargs: Any,
+    ) -> list[Document]:
+        """Get documents by id.
+
+        Fewer documents may be returned than requested if some IDs are not found or
+        if there are duplicated IDs.
+
+        Users should not assume that the order of the returned documents matches
+        the order of the input IDs. Instead, users should rely on the ID field of the
+        returned documents.
+
+        This method should **NOT** raise exceptions if no documents are found for
+        some IDs.
+
+        Args:
+            ids: List of IDs to get.
+            kwargs: Additional keyword arguments. These are up to the implementation.
+
+        Returns:
+            List[Document]: List of documents that were found.
+        """
+
+    async def aget(
+        self,
+        ids: Sequence[str],
+        /,
+        **kwargs: Any,
+    ) -> list[Document]:
+        """Get documents by id.
+
+        Fewer documents may be returned than requested if some IDs are not found or
+        if there are duplicated IDs.
+
+        Users should not assume that the order of the returned documents matches
+        the order of the input IDs. Instead, users should rely on the ID field of the
+        returned documents.
+
+        This method should **NOT** raise exceptions if no documents are found for
+        some IDs.
+
+        Args:
+            ids: List of IDs to get.
+            kwargs: Additional keyword arguments. These are up to the implementation.
+
+        Returns:
+            List[Document]: List of documents that were found.
+        """
+        return await run_in_executor(
+            None,
+            self.get,
+            ids,
+            **kwargs,
+        )
+
 
 class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
     def __init__(self, vector_store: VectorStore):
@@ -204,6 +264,34 @@ class OpenSearchMMRTraversalAdapter(MMRTraversalAdapter):
 
         return docs
 
+    def get(self, ids: Sequence[str], /, **kwargs: Any) -> list[Document]:
+        """Get documents by id."""
+        try:
+            from opensearchpy.exceptions import NotFoundError
+        except (ImportError, ModuleNotFoundError):
+            msg = "please `pip install opensearch-py`."
+            raise ImportError(msg)
+
+        docs: list[Document] = []
+        for id in ids:
+            try:
+                hit = self._vector_store.client.get(
+                    index=self._vector_store.index_name,
+                    id=id,
+                    _source_includes=["text", "metadata"],
+                    **kwargs,
+                )
+                docs.append(
+                    Document(
+                        page_content=hit["_source"]["text"],
+                        metadata=hit["_source"]["metadata"],
+                        id=hit["_id"],
+                    )
+                )
+            except NotFoundError:
+                pass
+        return docs
+
 
 class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
     def __init__(self, vector_store: VectorStore):
@@ -253,6 +341,20 @@ class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
                 )
             )
         return docs
+
+    def get(self, ids: Sequence[str], /, **kwargs: Any) -> list[Document]:
+        """Get documents by id."""
+        results = self._vector_store.get(ids=list(ids), **kwargs)
+        return [
+            Document(
+                page_content=text,
+                metadata=metadata,
+                id=id,
+            )
+            for (text, metadata, id) in zip(
+                results["documents"], results["metadatas"], results["ids"]
+            )
+        ]
 
 
 class AstraMMRTraversalAdapter(MMRTraversalAdapter):
@@ -351,6 +453,24 @@ class AstraMMRTraversalAdapter(MMRTraversalAdapter):
         )
         return self._build_docs(docs_with_embeddings=docs_with_embeddings)
 
+    def get(self, ids: Sequence[str], /, **kwargs: Any) -> list[Document]:
+        """Get documents by id."""
+        docs: list[Document] = []
+        for id in ids:
+            doc = self._vector_store.get_by_document_id(id, **kwargs)
+            if doc is not None:
+                docs.append(doc)
+        return docs
+
+    async def aget(self, ids: Sequence[str], /, **kwargs: Any) -> list[Document]:
+        """Get documents by id."""
+        docs: list[Document] = []
+        for id in ids:
+            doc = await self._vector_store.aget_by_document_id(id, **kwargs)
+            if doc is not None:
+                docs.append(doc)
+        return docs
+
 
 class CassandraMMRTraversalAdapter(MMRTraversalAdapter):
     def __init__(self, vector_store: VectorStore):
@@ -379,3 +499,21 @@ class CassandraMMRTraversalAdapter(MMRTraversalAdapter):
         return await self._vector_store.asimilarity_search_with_embedding_by_vector(
             **kwargs
         )
+
+    def get(self, ids: Sequence[str], /, **kwargs: Any) -> list[Document]:
+        """Get documents by id."""
+        docs: list[Document] = []
+        for id in ids:
+            doc = self._vector_store.get_by_document_id(id, **kwargs)
+            if doc is not None:
+                docs.append(doc)
+        return docs
+
+    async def aget(self, ids: Sequence[str], /, **kwargs: Any) -> list[Document]:
+        """Get documents by id."""
+        docs: list[Document] = []
+        for id in ids:
+            doc = await self._vector_store.aget_by_document_id(id, **kwargs)
+            if doc is not None:
+                docs.append(doc)
+        return docs

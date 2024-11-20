@@ -3,7 +3,6 @@ import dataclasses
 from typing import (
     TYPE_CHECKING,
     Any,
-    AsyncIterator,
     Dict,
     Iterable,
     List,
@@ -476,12 +475,10 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             # Initialize the visited_edges with the set of outgoing edges from the
             # neighborhood. This prevents re-visiting them.
             visited_edges = set()
-
-            # TODO this still needs to exist
-            for doc in self.vector_store_adapter.get_documents_by_ids(
-                doc_ids=neighborhood
-            ):
-                visited_edges.update(self._get_outgoing_edges(doc=doc))
+            for doc in self.vector_store_adapter.get(neighborhood):
+                visited_edges.update(
+                    self._get_outgoing_edges(doc=EmbeddedDocument(doc=doc))
+                )
 
             # Fetch the candidates.
             adjacent_nodes = self._get_adjacent(
@@ -670,22 +667,13 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 {content_id: set() for content_id in neighborhood}
             )
 
-            async def fetch_documents(
-                doc_ids: Sequence[str],
-            ) -> AsyncIterator[EmbeddedDocument]:
-                for doc_id in doc_ids:
-                    doc = await self.vector_store_adapter.aget_by_document_id(
-                        document_id=doc_id
-                    )
-                    if doc is not None:
-                        yield EmbeddedDocument(doc=doc)
-
             # Initialize the visited_edges with the set of outgoing edges from the
             # neighborhood. This prevents re-visiting them.
             visited_edges = set()
-
-            async for doc in fetch_documents(doc_ids=neighborhood):
-                visited_edges.update(self._get_outgoing_edges(doc=doc))
+            for doc in await self.vector_store_adapter.aget(neighborhood):
+                visited_edges.update(
+                    self._get_outgoing_edges(doc=EmbeddedDocument(doc=doc))
+                )
 
             # Fetch the candidates.
             adjacent_nodes = await self._aget_adjacent(
