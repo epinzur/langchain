@@ -502,11 +502,12 @@ class Cassandra(VectorStore):
         return
 
     @staticmethod
-    def _row_to_document(row: Dict[str, Any]) -> Document:
+    def _row_to_document(row: Dict[str, Any], include_embedding=False) -> Document:
         metadata = row.get("metadata", {})
-        embedding = row.get("vector")
-        if embedding is not None:
-            metadata[METADATA_EMBEDDING_KEY] = embedding
+        if include_embedding:
+            embedding = row.get("vector")
+            if embedding is not None:
+                metadata[METADATA_EMBEDDING_KEY] = embedding
 
         return Document(
             id=row["row_id"],
@@ -663,7 +664,7 @@ class Cassandra(VectorStore):
             n=k,
             **kwargs,
         )
-        return [self._row_to_document(row=hit) for hit in hits]
+        return [self._row_to_document(row=hit, include_embedding=True) for hit in hits]
 
     async def asimilarity_search_with_embedding_by_vector(
         self,
@@ -694,7 +695,7 @@ class Cassandra(VectorStore):
             n=k,
             **kwargs,
         )
-        return [self._row_to_document(row=hit) for hit in hits]
+        return [self._row_to_document(row=hit, include_embedding=True) for hit in hits]
 
     @staticmethod
     def _search_to_documents(

@@ -303,7 +303,7 @@ def test_traversal(
         page_content="Hello Earth",
         metadata={"outgoing": "parent", "keywords": ["greeting", "earth"]},
     )
-    vector_store.add_documents([greetings, doc1, doc2], engine="faiss")
+    vector_store.add_documents([greetings, doc1, doc2])
 
     vector_store_adapter = get_adapter(
         vector_store=vector_store,
@@ -349,7 +349,7 @@ class TestGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Graph traversal search on a vector store."""
-        vector_store.add_documents(graph_vector_store_docs, engine="faiss")
+        vector_store.add_documents(graph_vector_store_docs)
 
         vector_store_adapter = get_adapter(
             vector_store=vector_store,
@@ -384,7 +384,7 @@ class TestGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """Graph traversal search on a graph store."""
-        await vector_store.aadd_documents(graph_vector_store_docs, engine="faiss")
+        await vector_store.aadd_documents(graph_vector_store_docs)
 
         vector_store_adapter = get_adapter(
             vector_store=vector_store,

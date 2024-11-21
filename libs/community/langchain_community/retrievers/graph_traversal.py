@@ -620,9 +620,15 @@ class ChromaTraversalAdapter(TraversalAdapter):
         self._base_vector_store = vector_store
 
     def similarity_search_by_vector(  # type: ignore
-        self, **kwargs: Any
+        self,
+        embedding: List[float],
+        k: int = 4,
+        filter: Optional[Dict[str, str]] = None,
+        **kwargs: Any,
     ) -> List[Document]:
-        return self._vector_store.similarity_search_by_vector(**kwargs)
+        return self._vector_store.similarity_search_by_vector(
+            embedding=embedding, k=k, filter=filter, **kwargs
+        )
 
 
 class OpenSearchTraversalAdapter(TraversalAdapter):

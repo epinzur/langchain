@@ -289,7 +289,7 @@ def test_mmr_traversal(vector_store: VectorStore, vector_store_type: str) -> Non
     v2.metadata["incoming"] = "link"
     v3.metadata["incoming"] = "link"
 
-    vector_store.add_documents([v0, v1, v2, v3], engine="faiss")
+    vector_store.add_documents([v0, v1, v2, v3])
 
     vector_store_adapter = get_adapter(
         vector_store=vector_store,
@@ -342,7 +342,7 @@ class TestMmrGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
-        vector_store.add_documents(graph_vector_store_docs, engine="faiss")
+        vector_store.add_documents(graph_vector_store_docs)
 
         vector_store_adapter = get_adapter(
             vector_store=vector_store,
@@ -358,7 +358,6 @@ class TestMmrGraphTraversal:
         )
 
         docs = retriever.invoke(input="[2, 10]")
-        # TODO: can this rightfully be a list (or must it be a set)?
         mt_labels = {doc.metadata["label"] for doc in docs}
         assert mt_labels == {"AR", "BR"}
         assert docs[0].metadata
@@ -373,7 +372,7 @@ class TestMmrGraphTraversal:
         graph_vector_store_docs: list[Document],
     ) -> None:
         """MMR Graph traversal search on a vector store."""
-        await vector_store.aadd_documents(graph_vector_store_docs, engine="faiss")
+        await vector_store.aadd_documents(graph_vector_store_docs)
 
         vector_store_adapter = get_adapter(
             vector_store=vector_store,
