@@ -1,11 +1,7 @@
-from typing import Any, Sequence
+from typing import Any, List, Sequence
 
-from langchain_core._api import beta
 from langchain_core.documents import Document, BaseDocumentTransformer
 
-
-
-@beta()
 class GLiNEREntityExtractor(BaseDocumentTransformer):
     """Link documents with common named entities using `GLiNER`_.
 
