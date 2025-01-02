@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional, Set, Sequence
+from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Set
 from urllib.parse import urldefrag, urljoin, urlparse
 
 from langchain_core._api import beta
-from langchain_core.documents import Document, BaseDocumentTransformer
-
+from langchain_core.documents import BaseDocumentTransformer, Document
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
@@ -188,8 +187,13 @@ class HtmlHyperlinkExtractor(BaseDocumentTransformer):
             dropped. Defaults to ``True``.
     """  # noqa: E501
 
-    def __init__(self, *, url_metadata_key = "url", metadata_key: str = "hyperlink", drop_fragments: bool = True):
-
+    def __init__(
+        self,
+        *,
+        url_metadata_key: str = "url",
+        metadata_key: str = "hyperlink",
+        drop_fragments: bool = True,
+    ):
         try:
             from bs4 import BeautifulSoup  # noqa:F401
         except ImportError as e:
@@ -203,7 +207,9 @@ class HtmlHyperlinkExtractor(BaseDocumentTransformer):
         self._drop_fragments = drop_fragments
 
     @staticmethod
-    def _parse_url(link: Tag, page_url: str, drop_fragments: bool = True) -> Optional[str]:
+    def _parse_url(
+        link: Tag, page_url: str, drop_fragments: bool = True
+    ) -> Optional[str]:
         href = link.get("href")
         if href is None:
             return None
@@ -230,7 +236,9 @@ class HtmlHyperlinkExtractor(BaseDocumentTransformer):
         urls: Set[str] = set()
 
         for link in soup_links:
-            parsed_url = HtmlHyperlinkExtractor._parse_url(link, page_url=page_url, drop_fragments=drop_fragments)
+            parsed_url = HtmlHyperlinkExtractor._parse_url(
+                link, page_url=page_url, drop_fragments=drop_fragments
+            )
             # Remove self links and entries for any 'a' tag that failed to parse
             # (didn't have href, or invalid domain, etc.)
             if parsed_url and parsed_url != page_url:
@@ -245,8 +253,8 @@ class HtmlHyperlinkExtractor(BaseDocumentTransformer):
         for document in documents:
             if self._url_metadata_key not in document.metadata:
                 msg = (
-                    f"html document url not found in metadata at {self._url_metadata_key}",
-                    f" for document id: {document.id}"
+                    f"html document url not found in metadata at "
+                    f"{self._url_metadata_key} for document id: {document.id}"
                 )
                 raise ValueError(msg)
 
@@ -257,8 +265,6 @@ class HtmlHyperlinkExtractor(BaseDocumentTransformer):
             soup = BeautifulSoup(document.page_content, "html.parser", **kwargs)
 
             document.metadata[self._metadata_key] = self._parse_urls(
-                soup=soup,
-                page_url=page_url,
-                drop_fragments=self._drop_fragments
+                soup=soup, page_url=page_url, drop_fragments=self._drop_fragments
             )
         return documents

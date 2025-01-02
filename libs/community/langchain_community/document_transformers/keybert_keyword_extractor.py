@@ -2,6 +2,7 @@ from typing import Any, Sequence
 
 from langchain_core.documents import BaseDocumentTransformer, Document
 
+
 class KeybertKeywordExtractor(BaseDocumentTransformer):
     def __init__(
         self,
@@ -131,15 +132,14 @@ class KeybertKeywordExtractor(BaseDocumentTransformer):
         self._batch_size = batch_size
         self._metadata_key = metadata_key
 
-
     def transform_documents(
         self, documents: Sequence[Document], **kwargs: Any
     ) -> Sequence[Document]:
         """Extracts properties from documents using KeyBERT."""
         for i in range(0, len(documents), self._batch_size):
-            batch = documents[i:i+self._batch_size]
+            batch = documents[i : i + self._batch_size]
             texts = [item.page_content for item in batch]
-            extracted = self._kw_model.extract_keywords(docs = texts, **kwargs)
+            extracted = self._kw_model.extract_keywords(docs=texts, **kwargs)
             if len(texts) == 1:
                 # Even though we pass a list, if it contains one item, keybert will
                 # flatten it. This means it's easier to just call the special case
