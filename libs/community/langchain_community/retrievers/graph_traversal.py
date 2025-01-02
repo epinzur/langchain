@@ -186,7 +186,7 @@ class GraphTraversalRetriever(BaseRetriever):
     store: TraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
     start_k: int = Field(default=4)
-    depth: int = Field(default=4)
+    max_depth: int = Field(default=4)
     _edge_lookup: Dict[str, str] = PrivateAttr(default={})
 
     def __init__(self, **kwargs: Any):
@@ -238,7 +238,7 @@ class GraphTraversalRetriever(BaseRetriever):
         #
         # ...
         start_k = self.start_k if start_k is None else start_k
-        depth = self.depth if depth is None else depth
+        depth = self.max_depth if depth is None else depth
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}
@@ -333,7 +333,7 @@ class GraphTraversalRetriever(BaseRetriever):
         #
         # ...
         start_k = self.start_k if start_k is None else start_k
-        depth = self.depth if depth is None else depth
+        depth = self.max_depth if depth is None else depth
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}

@@ -314,7 +314,7 @@ def test_traversal(
         store=vector_store_adapter,
         edges=[("outgoing", "incoming"), "keywords"],
         start_k=2,
-        depth=2,
+        max_depth=2,
     )
 
     docs = retriever.invoke("Earth", start_k=1, depth=0)
@@ -359,7 +359,7 @@ class TestGraphTraversal:
         retriever = GraphTraversalRetriever(
             store=vector_store_adapter,
             edges=[("out", "in"), "tag"],
-            depth=2,
+            max_depth=2,
             start_k=2,
         )
 
@@ -394,7 +394,7 @@ class TestGraphTraversal:
         retriever = GraphTraversalRetriever(
             store=vector_store_adapter,
             edges=[("out", "in"), "tag"],
-            depth=2,
+            max_depth=2,
             start_k=2,
         )
         docs = await retriever.ainvoke(input="[2, 10]", depth=0)
