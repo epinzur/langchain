@@ -311,7 +311,7 @@ def test_traversal(
     )
 
     retriever = GraphTraversalRetriever(
-        vector_store_adapter=vector_store_adapter,
+        store=vector_store_adapter,
         edges=[("outgoing", "incoming"), "keywords"],
         start_k=2,
         depth=2,
@@ -357,7 +357,7 @@ class TestGraphTraversal:
         )
 
         retriever = GraphTraversalRetriever(
-            vector_store_adapter=vector_store_adapter,
+            store=vector_store_adapter,
             edges=[("out", "in"), "tag"],
             depth=2,
             start_k=2,
@@ -392,7 +392,7 @@ class TestGraphTraversal:
         )
 
         retriever = GraphTraversalRetriever(
-            vector_store_adapter=vector_store_adapter,
+            store=vector_store_adapter,
             edges=[("out", "in"), "tag"],
             depth=2,
             start_k=2,

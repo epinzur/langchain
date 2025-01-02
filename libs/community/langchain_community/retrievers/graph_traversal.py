@@ -180,10 +180,10 @@ class DocumentCache:
         return docs
 
 
-# this class uses pydantic, so vector_store_adapter and edges
+# this class uses pydantic, so store and edges
 # must be provided at init time.
 class GraphTraversalRetriever(BaseRetriever):
-    vector_store_adapter: TraversalAdapter
+    store: TraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
     start_k: int = Field(default=4)
     depth: int = Field(default=4)
@@ -269,7 +269,7 @@ class GraphTraversalRetriever(BaseRetriever):
                     )
 
                     docs = list(
-                        self.vector_store_adapter.similarity_search_by_vector(
+                        self.store.similarity_search_by_vector(
                             embedding=query_embedding,
                             k=1000,
                             filter=metadata_filter,
@@ -289,7 +289,7 @@ class GraphTraversalRetriever(BaseRetriever):
                         visit_nodes(d=d + 1, nodes=nodes)
 
         # Start the traversal
-        query_embedding, initial_nodes = self.vector_store_adapter.similarity_search(
+        query_embedding, initial_nodes = self.store.similarity_search(
             query=query,
             k=start_k,
             filter=filter,
@@ -359,7 +359,7 @@ class GraphTraversalRetriever(BaseRetriever):
             if _outgoing_edges:
                 metadata_search_tasks = [
                     asyncio.create_task(
-                        self.vector_store_adapter.asimilarity_search_by_vector(
+                        self.store.asimilarity_search_by_vector(
                             embedding=query_embedding,
                             k=1000,
                             filter=self._get_metadata_filter(
@@ -390,7 +390,7 @@ class GraphTraversalRetriever(BaseRetriever):
         (
             query_embedding,
             initial_nodes,
-        ) = await self.vector_store_adapter.asimilarity_search(
+        ) = await self.store.asimilarity_search(
             query=query,
             k=start_k,
             filter=filter,

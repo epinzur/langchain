@@ -538,10 +538,10 @@ class Edge:
         return hash((self.direction, self.key, self.value))
 
 
-# this class uses pydantic, so vector_store_adapter and edges
+# this class uses pydantic, so store and edges
 # must be provided at init time.
 class GraphMMRTraversalRetriever(BaseRetriever):
-    vector_store_adapter: MMRTraversalAdapter
+    store: MMRTraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
     k: int = Field(default=4)
     depth: int = Field(default=2)
@@ -657,7 +657,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             # Initialize the visited_edges with the set of outgoing edges from the
             # neighborhood. This prevents re-visiting them.
             visited_edges = set()
-            for doc in self.vector_store_adapter.get(neighborhood):
+            for doc in self.store.get(neighborhood):
                 visited_edges.update(
                     self._get_outgoing_edges(doc=EmbeddedDocument(doc=doc))
                 )
@@ -852,7 +852,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             # Initialize the visited_edges with the set of outgoing edges from the
             # neighborhood. This prevents re-visiting them.
             visited_edges = set()
-            for doc in await self.vector_store_adapter.aget(neighborhood):
+            for doc in await self.store.aget(neighborhood):
                 visited_edges.update(
                     self._get_outgoing_edges(doc=EmbeddedDocument(doc=doc))
                 )
@@ -969,7 +969,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         **kwargs: Any,
     ) -> tuple[list[float], list[EmbeddedDocument]]:
         query_embedding, docs = (
-            self.vector_store_adapter.similarity_search_with_embedding(
+            self.store.similarity_search_with_embedding(
                 query=query,
                 k=fetch_k,
                 filter=filter,
@@ -988,7 +988,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         (
             query_embedding,
             docs,
-        ) = await self.vector_store_adapter.asimilarity_search_with_embedding(
+        ) = await self.store.asimilarity_search_with_embedding(
             query=query,
             k=fetch_k,
             filter=filter,
@@ -1018,7 +1018,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         """
         results: set[EmbeddedDocument] = set()
         for outgoing_edge in outgoing_edges:
-            docs = self.vector_store_adapter.similarity_search_with_embedding_by_vector(
+            docs = self.store.similarity_search_with_embedding_by_vector(
                 embedding=query_embedding,
                 k=k_per_edge or 10,
                 filter=self._get_metadata_filter(
@@ -1051,7 +1051,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         """
 
         tasks = [
-            self.vector_store_adapter.asimilarity_search_with_embedding_by_vector(
+            self.store.asimilarity_search_with_embedding_by_vector(
                 embedding=query_embedding,
                 k=k_per_edge or 10,
                 filter=self._get_metadata_filter(

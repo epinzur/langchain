@@ -297,7 +297,7 @@ def test_mmr_traversal(vector_store: VectorStore, vector_store_type: str) -> Non
     )
 
     retriever = GraphMMRTraversalRetriever(
-        vector_store_adapter=vector_store_adapter,
+        store=vector_store_adapter,
         edges=[("outgoing", "incoming")],
         fetch_k=2,
         k=2,
@@ -350,7 +350,7 @@ class TestMmrGraphTraversal:
         )
 
         retriever = GraphMMRTraversalRetriever(
-            vector_store_adapter=vector_store_adapter,
+            store=vector_store_adapter,
             vector_store=vector_store,
             edges=[("out", "in"), "tag"],
             depth=2,
@@ -380,7 +380,7 @@ class TestMmrGraphTraversal:
         )
 
         retriever = GraphMMRTraversalRetriever(
-            vector_store_adapter=vector_store_adapter,
+            store=vector_store_adapter,
             vector_store=vector_store,
             edges=[("out", "in"), "tag"],
             depth=2,
