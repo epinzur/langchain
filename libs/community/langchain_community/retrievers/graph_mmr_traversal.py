@@ -968,13 +968,11 @@ class GraphMMRTraversalRetriever(BaseRetriever):
         filter: dict[str, Any] | None = None,  # noqa: A002
         **kwargs: Any,
     ) -> tuple[list[float], list[EmbeddedDocument]]:
-        query_embedding, docs = (
-            self.store.similarity_search_with_embedding(
-                query=query,
-                k=fetch_k,
-                filter=filter,
-                **kwargs,
-            )
+        query_embedding, docs = self.store.similarity_search_with_embedding(
+            query=query,
+            k=fetch_k,
+            filter=filter,
+            **kwargs,
         )
         return query_embedding, [EmbeddedDocument(doc=doc) for doc in docs]
 

@@ -502,7 +502,9 @@ class Cassandra(VectorStore):
         return
 
     @staticmethod
-    def _row_to_document(row: Dict[str, Any], include_embedding: bool = False) -> Document:
+    def _row_to_document(
+        row: Dict[str, Any], include_embedding: bool = False
+    ) -> Document:
         metadata = row.get("metadata", {})
         if include_embedding:
             embedding = row.get("vector")

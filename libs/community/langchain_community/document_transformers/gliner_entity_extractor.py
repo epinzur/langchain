@@ -27,6 +27,8 @@ class GLiNEREntityExtractor(BaseDocumentTransformer):
     We load the ``state_of_the_union.txt`` file, chunk it, then for each chunk we
     add named entities to the metadata.
 
+    .. code-block:: python
+
         from langchain_community.document_loaders import WebBaseLoader
         from langchain_community.document_transformers import GLiNEREntityExtractor
         from langchain_text_splitters import CharacterTextSplitter
