@@ -621,6 +621,8 @@ class ChromaTraversalAdapter(TraversalAdapter):
         filter: Optional[Dict[str, str]] = None,
         **kwargs: Any,
     ) -> List[Document]:
+        if k > self._vector_store._collection.count():
+            k = self._vector_store._collection.count()
         return self._vector_store.similarity_search_by_vector(
             embedding=embedding, k=k, filter=filter, **kwargs
         )

@@ -1312,6 +1312,9 @@ class ChromaMMRTraversalAdapter(MMRTraversalAdapter):
             msg = "please `pip install chromadb`"
             raise ImportError(msg)
 
+        if k > self._vector_store._collection.count():
+            k = self._vector_store._collection.count()
+
         results = self._vector_store._collection.query(
             query_embeddings=embedding,  # type: ignore
             n_results=k,
