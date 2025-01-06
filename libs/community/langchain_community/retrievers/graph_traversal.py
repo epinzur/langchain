@@ -1,11 +1,11 @@
 import asyncio
+import warnings
 from abc import abstractmethod
 from typing import (
     Any,
     Dict,
     Iterable,
     List,
-    Literal,
     Optional,
     Tuple,
     Union,
@@ -18,6 +18,8 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import run_in_executor
 from langchain_core.vectorstores import VectorStore
 from pydantic import Field, PrivateAttr
+
+BASIC_TYPES = (str, bool, int, float, complex, bytes)
 
 
 class TraversalAdapter:
@@ -127,30 +129,38 @@ class TraversalAdapter:
 
 
 class Edge:
-    DIRECTION = Literal["bi-dir", "in", "out"]
-    direction: DIRECTION
+    """Represents an edge to all nodes with the given key/value incoming."""
     key: str
     value: Any
+    is_denormalized: bool
 
-    def __init__(self, direction: DIRECTION, key: str, value: Any) -> None:
-        self.direction = direction
+    def __init__(self, key: str, value: Any, is_denormalized: bool = False) -> None:
         self.key = key
         self.value = value
+        self.is_denormalized = is_denormalized
 
     def __str__(self) -> str:
-        return f"{self.direction}:{self.key}:{self.value}"
+        return f"Edge({self.key}->{self.value}, is_denormalized={self.is_denormalized})"
+
+    def __repr__(self) -> str:
+        return f"Edge(key={self.key}, value={self.value}, is_denormalized={self.is_denormalized})"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Edge):
             return NotImplemented
         return (
-            self.direction == other.direction
-            and self.key == other.key
+            self.key == other.key
             and self.value == other.value
+            and self.is_denormalized == other.is_denormalized
         )
 
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Edge):
+            return NotImplemented
+        return (self.__str__()) < (other.__str__())
+
     def __hash__(self) -> int:
-        return hash((self.direction, self.key, self.value))
+        return hash((self.key, self.value, self.is_denormalized))
 
 
 class DocumentCache:
@@ -185,21 +195,25 @@ class DocumentCache:
 class GraphTraversalRetriever(BaseRetriever):
     store: TraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
+    _edges: List[Tuple[str,str]] = PrivateAttr(default=[])
     start_k: int = Field(default=4)
     max_depth: int = Field(default=4)
-    _edge_lookup: Dict[str, str] = PrivateAttr(default={})
+    use_denormalized_metadata: bool = Field(default=False)
+    denormalized_path_delimiter: str = Field(default=".")
+    denormalized_static_value: Any = Field(default=True)
+
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         for edge in self.edges:
             if isinstance(edge, str):
-                self._edge_lookup[edge] = edge
+                self._edges.append((edge, edge))
             elif (
                 isinstance(edge, tuple)
                 and len(edge) == 2
                 and all(isinstance(item, str) for item in edge)
             ):
-                self._edge_lookup[edge[0]] = edge[1]
+                self._edges.append(edge)
             else:
                 raise ValueError(
                     "Invalid type for edge. must be 'str' or 'tuple[str,str]'"
@@ -210,7 +224,7 @@ class GraphTraversalRetriever(BaseRetriever):
         query: str,
         *,
         start_k: int | None = None,
-        depth: int | None = None,
+        max_depth: int | None = None,
         filter: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> list[Document]:
@@ -221,7 +235,7 @@ class GraphTraversalRetriever(BaseRetriever):
             run_manager: The callback handler to use.
             start_k: The number of Documents to return from the initial vector search.
                 Defaults to 4.
-            depth: The maximum depth of edges to traverse. Defaults to 1.
+            max_depth: The maximum depth of edges to traverse. Defaults to 1.
             filter: Optional metadata to filter the results.
             **kwargs: Additional keyword arguments.
         Returns:
@@ -238,7 +252,7 @@ class GraphTraversalRetriever(BaseRetriever):
         #
         # ...
         start_k = self.start_k if start_k is None else start_k
-        depth = self.max_depth if depth is None else depth
+        max_depth = self.max_depth if max_depth is None else max_depth
 
         # Map from visited ID to depth
         visited_ids: dict[str, int] = {}
@@ -258,14 +272,14 @@ class GraphTraversalRetriever(BaseRetriever):
                 visited_ids=visited_ids,
                 visited_edges=visited_edges,
                 d=d,
-                depth=depth,
+                depth=max_depth,
             )
 
             if _outgoing_edges:
                 for outgoing_edge in _outgoing_edges:
                     metadata_filter = self._get_metadata_filter(
                         metadata=filter,
-                        outgoing_edge=outgoing_edge,
+                        edge=outgoing_edge,
                     )
 
                     docs = list(
@@ -281,7 +295,7 @@ class GraphTraversalRetriever(BaseRetriever):
                     new_ids_at_next_depth: set[str] = set()
                     for doc in docs:
                         if doc.id is not None:
-                            if d < visited_ids.get(doc.id, depth):
+                            if d < visited_ids.get(doc.id, max_depth):
                                 new_ids_at_next_depth.add(doc.id)
 
                     if new_ids_at_next_depth:
@@ -363,7 +377,7 @@ class GraphTraversalRetriever(BaseRetriever):
                             embedding=query_embedding,
                             k=1000,
                             filter=self._get_metadata_filter(
-                                metadata=filter, outgoing_edge=outgoing_edge
+                                metadata=filter, edge=outgoing_edge
                             ),
                             **kwargs,
                         )
@@ -401,44 +415,29 @@ class GraphTraversalRetriever(BaseRetriever):
 
         return doc_cache.get_by_document_ids(ids=visited_ids)
 
-    def _get_edges(self, direction: Edge.DIRECTION, key: str, value: Any) -> set[Edge]:
-        if isinstance(value, str):
-            return {Edge(direction=direction, key=key, value=value)}
-        elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-            return {Edge(direction=direction, key=key, value=item) for item in value}
-        else:
-            msg = (
-                "Expected a string or an iterable of"
-                " strings, but got an unsupported type."
-            )
-            raise TypeError(msg)
-
     def _get_outgoing_edges(self, doc: Document) -> set[Edge]:
-        outgoing_edges = set()
-        for edge in self.edges:
-            if isinstance(edge, str):
-                if edge in doc.metadata:
-                    outgoing_edges.update(
-                        self._get_edges(
-                            direction="bi-dir", key=edge, value=doc.metadata[edge]
-                        )
-                    )
-            elif (
-                isinstance(edge, tuple)
-                and len(edge) == 2
-                and all(isinstance(item, str) for item in edge)
-            ):
-                if edge[0] in doc.metadata:
-                    outgoing_edges.update(
-                        self._get_edges(
-                            direction="out", key=edge[0], value=doc.metadata[edge[0]]
-                        )
-                    )
-            else:
-                raise ValueError(
-                    "Invalid type for edge. must be 'str' or 'tuple[str,str]'"
-                )
-        return outgoing_edges
+        edges = set()
+        for source_key, target_key in self._edges:
+            if source_key in doc.metadata:
+                value = doc.metadata[source_key]
+                if isinstance(value, BASIC_TYPES):
+                    edges.add(Edge(key=target_key, value=value))
+                elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+                    if self.use_denormalized_metadata:
+                        warnings.warn("Iterable metadata values are supported as edges in denormalized metadata")
+                    else:
+                        for item in value:
+                            if isinstance(item, BASIC_TYPES):
+                                edges.add(Edge(key=target_key, value=item))
+            elif self.use_denormalized_metadata:
+                prefix = f"{source_key}{self.denormalized_path_delimiter}"
+                matching_keys: list[str] = [key for key in doc.metadata if key.startswith(prefix)]
+                for matching_key in matching_keys:
+                    if doc.metadata[matching_key] == self.denormalized_static_value:
+                        edges.add(Edge(
+                            key=target_key, value=matching_key.removeprefix(prefix), is_denormalized=True,
+                        ))
+        return edges
 
     def _gather_outgoing_edges(
         self,
@@ -473,26 +472,22 @@ class GraphTraversalRetriever(BaseRetriever):
     def _get_metadata_filter(
         self,
         metadata: dict[str, Any] | None = None,
-        outgoing_edge: Edge | None = None,
+        edge: Edge | None = None,
     ) -> dict[str, Any]:
-        """Builds a metadata filter to search for document
+        """Builds a metadata filter to search for documents
 
         Args:
             metadata: Any metadata that should be used for hybrid search
-            outgoing_edge: An optional outgoing edge to add to the search
-
-        Returns:
-            The document metadata ready for insertion into the database
+            edge: An optional outgoing edge to add to the search
         """
-        if outgoing_edge is None:
+        if edge is None:
             return metadata or {}
 
         metadata_filter = {} if metadata is None else metadata.copy()
-        if outgoing_edge.direction == "bi-dir":
-            metadata_filter[outgoing_edge.key] = outgoing_edge.value
-        elif outgoing_edge.direction == "out":
-            in_key = self._edge_lookup[outgoing_edge.key]
-            metadata_filter[in_key] = outgoing_edge.value
+        if edge.is_denormalized:
+            metadata_filter[f"{edge.key}{self.denormalized_path_delimiter}{edge.value}"] = self.denormalized_static_value
+        else:
+            metadata_filter[edge.key] = edge.value
 
         return metadata_filter
 
