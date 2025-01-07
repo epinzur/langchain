@@ -166,15 +166,17 @@ class Edge:
 class DocumentCache:
     documents: dict[str, Document] = {}
 
-    def add_document(self, doc: Document) -> None:
+    def add_document(self, doc: Document, depth_found: int) -> None:
         if doc.id is None:
             msg = "All documents should have ids"
             raise ValueError(msg)
-        self.documents[doc.id] = doc
+        if doc.id not in self.documents:
+            doc.metadata["_depth_found"] = depth_found
+            self.documents[doc.id] = doc
 
-    def add_documents(self, docs: Iterable[Document]) -> None:
+    def add_documents(self, docs: Iterable[Document], depth_found: int) -> None:
         for doc in docs:
-            self.add_document(doc=doc)
+            self.add_document(doc=doc, depth_found=depth_found)
 
     def get_by_document_ids(
         self,
@@ -290,7 +292,7 @@ class GraphTraversalRetriever(BaseRetriever):
                             **kwargs,
                         )
                     )
-                    doc_cache.add_documents(docs)
+                    doc_cache.add_documents(docs, d + 1)
 
                     new_ids_at_next_depth: set[str] = set()
                     for doc in docs:
@@ -309,10 +311,10 @@ class GraphTraversalRetriever(BaseRetriever):
             filter=filter,
             **kwargs,
         )
-        doc_cache.add_documents(docs=initial_nodes)
+        doc_cache.add_documents(docs=initial_nodes, depth_found=0)
         visit_nodes(d=0, nodes=initial_nodes)
 
-        return doc_cache.get_by_document_ids(ids=visited_ids)
+        return doc_cache.get_by_document_ids(ids=visited_ids.keys())
 
     async def _aget_relevant_documents(
         self,
@@ -388,7 +390,7 @@ class GraphTraversalRetriever(BaseRetriever):
                 for search_task in asyncio.as_completed(metadata_search_tasks):
                     docs = await search_task
                     docs = list(docs)
-                    doc_cache.add_documents(docs)
+                    doc_cache.add_documents(docs, d + 1)
 
                     new_ids_at_next_depth: set[str] = set()
                     for doc in docs:
@@ -410,10 +412,10 @@ class GraphTraversalRetriever(BaseRetriever):
             filter=filter,
             **kwargs,
         )
-        doc_cache.add_documents(docs=initial_nodes)
+        doc_cache.add_documents(docs=initial_nodes, depth_found=0)
         await visit_nodes(d=0, nodes=initial_nodes)
 
-        return doc_cache.get_by_document_ids(ids=visited_ids)
+        return doc_cache.get_by_document_ids(ids=visited_ids.keys())
 
     def _get_outgoing_edges(self, doc: Document) -> set[Edge]:
         edges = set()

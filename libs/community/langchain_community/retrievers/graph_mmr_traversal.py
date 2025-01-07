@@ -435,8 +435,8 @@ class MmrHelper:
         self.selected_embeddings[selection_index] = selected_embedding
 
         # Set the scores in the doc metadata
-        selected_doc.metadata["similarity_score"] = selected_similarity
-        selected_doc.metadata["mmr_score"] = self.best_score
+        selected_doc.metadata["_similarity_score"] = selected_similarity
+        selected_doc.metadata["_mmr_score"] = self.best_score
 
         # Reset the best score / best ID.
         self.best_score = NEG_INF
@@ -455,7 +455,7 @@ class MmrHelper:
 
         return selected_doc
 
-    def add_candidates(self, candidates: dict[str, EmbeddedDocument]) -> None:
+    def add_candidates(self, candidates: dict[str, EmbeddedDocument], depth_found: int) -> None:
         """Add candidates to the consideration set."""
         # Determine the keys to actually include.
         # These are the candidates that aren't already selected
@@ -497,6 +497,7 @@ class MmrHelper:
                 weighted_similarity=self.lambda_mult * similarity[index][0],
                 weighted_redundancy=self.lambda_mult_complement * max_redundancy,
             )
+            candidate.doc.metadata["_depth_found"] = depth_found
             self.candidates.append(candidate)
 
             if candidate.score >= self.best_score:
@@ -694,11 +695,11 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             lambda_mult=lambda_mult,
             score_threshold=score_threshold,
         )
-        helper.add_candidates(candidates=initial_candidates)
+        helper.add_candidates(candidates=initial_candidates, depth_found=0)
 
         if initial_roots:
             neighborhood_candidates = fetch_neighborhood_candidates(initial_roots)
-            helper.add_candidates(candidates=neighborhood_candidates)
+            helper.add_candidates(candidates=neighborhood_candidates, depth_found=0)
 
         # Tracks the depth of each candidate.
         depths = {candidate_id: 0 for candidate_id in helper.candidate_ids()}
@@ -725,7 +726,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
 
                 # Find the document nodes with incoming edges from those edges.
                 adjacent_nodes = self._get_adjacent(
-                    outgoing_edges=selected_outgoing_edges,
+                    edges=selected_outgoing_edges,
                     query_embedding=query_embedding,
                     k_per_edge=adjacent_k,
                     filter=filter,
@@ -756,7 +757,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 new_candidates = self._get_candidate_embeddings(
                     nodes=adjacent_nodes, outgoing_edges_map=outgoing_edges_map
                 )
-                helper.add_candidates(new_candidates)
+                helper.add_candidates(new_candidates, depth_found=next_depth)
 
         return selected_docs
 
@@ -871,7 +872,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
 
             # Fetch the candidates.
             adjacent_nodes = await self._aget_adjacent(
-                outgoing_edges=visited_edges,
+                edges=visited_edges,
                 query_embedding=query_embedding,
                 k_per_edge=adjacent_k,
                 filter=filter,
@@ -889,11 +890,11 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             lambda_mult=lambda_mult,
             score_threshold=score_threshold,
         )
-        helper.add_candidates(candidates=initial_candidates)
+        helper.add_candidates(candidates=initial_candidates, depth_found=0)
 
         if initial_roots:
             neighborhood_candidates = await fetch_neighborhood_candidates(initial_roots)
-            helper.add_candidates(candidates=neighborhood_candidates)
+            helper.add_candidates(candidates=neighborhood_candidates, depth_found=0)
 
         # Tracks the depth of each candidate.
         depths = {candidate_id: 0 for candidate_id in helper.candidate_ids()}
@@ -921,7 +922,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
 
                 # Find the document nodes with incoming edges from those edges.
                 adjacent_nodes = await self._aget_adjacent(
-                    outgoing_edges=selected_outgoing_edges,
+                    edges=selected_outgoing_edges,
                     query_embedding=query_embedding,
                     k_per_edge=adjacent_k,
                     filter=filter,
@@ -952,7 +953,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 new_candidates = self._get_candidate_embeddings(
                     nodes=adjacent_nodes, outgoing_edges_map=outgoing_edges_map
                 )
-                helper.add_candidates(new_candidates)
+                helper.add_candidates(new_candidates, depth_found=next_depth)
 
         return selected_docs
 
@@ -1008,7 +1009,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
 
     def _get_adjacent(
         self,
-        outgoing_edges: set[Edge],
+        edges: set[Edge],
         query_embedding: list[float],
         k_per_edge: int | None = None,
         filter: dict[str, Any] | None = None,  # noqa: A002
@@ -1027,12 +1028,12 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             Iterable of adjacent edges.
         """
         results: set[EmbeddedDocument] = set()
-        for outgoing_edge in outgoing_edges:
+        for edge in edges:
             docs = self.store.similarity_search_with_embedding_by_vector(
                 embedding=query_embedding,
                 k=k_per_edge or 10,
                 filter=self._get_metadata_filter(
-                    metadata=filter, outgoing_edge=outgoing_edge
+                    metadata=filter, edge=edge
                 ),
                 **kwargs,
             )
@@ -1041,7 +1042,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
 
     async def _aget_adjacent(
         self,
-        outgoing_edges: set[Edge],
+        edges: set[Edge],
         query_embedding: list[float],
         k_per_edge: int | None = None,
         filter: dict[str, Any] | None = None,  # noqa: A002
@@ -1065,11 +1066,11 @@ class GraphMMRTraversalRetriever(BaseRetriever):
                 embedding=query_embedding,
                 k=k_per_edge or 10,
                 filter=self._get_metadata_filter(
-                    metadata=filter, outgoing_edge=outgoing_edge
+                    metadata=filter, edge=edge
                 ),
                 **kwargs,
             )
-            for outgoing_edge in outgoing_edges
+            for edge in edges
         ]
 
         results: set[EmbeddedDocument] = set()
