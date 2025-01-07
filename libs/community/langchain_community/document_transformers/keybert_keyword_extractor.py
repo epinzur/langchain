@@ -4,128 +4,74 @@ from langchain_core.documents import BaseDocumentTransformer, Document
 
 
 class KeybertKeywordExtractor(BaseDocumentTransformer):
+    """Add metadata to documents about keywords using `KeyBERT <https://maartengr.github.io/KeyBERT/>`_.
+
+    KeyBERT is a minimal and easy-to-use keyword extraction technique that
+    leverages BERT embeddings to create keywords and keyphrases that are most
+    similar to a document.
+
+    The KeybertKeywordExtractor uses KeyBERT add a list of keywords to a
+    document's metadata.
+
+    Preliminaries
+    -------------
+
+    Install the ``keybert`` package.
+
+    Note that ``bs4`` is also installed to support the WebBaseLoader in the example,
+    but not needed by the KeybertKeywordExtractor itself.
+
+    .. code-block:: bash
+
+        pip install -q langchain_community bs4 keybert
+
+    Example
+    -----
+
+    We load the ``state_of_the_union.txt`` file, chunk it, then for each chunk we
+    add keywords to the metadata.
+
+    .. code-block:: python
+
+        from langchain_community.document_loaders import WebBaseLoader
+        from langchain_community.document_transformers import KeybertKeywordExtractor
+        from langchain_text_splitters import CharacterTextSplitter
+
+        loader = WebBaseLoader("https://raw.githubusercontent.com/hwchase17/chat-your-data/master/state_of_the_union.txt")
+        raw_documents = loader.load()
+
+        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+        documents = text_splitter.split_documents(raw_documents)
+
+        extractor = KeybertKeywordExtractor()
+        documents = extractor.transform_documents(documents)
+
+        print(documents[0].metadata)
+
+    .. code-block:: output
+
+        {'source': 'https://raw.githubusercontent.com/hwchase17/chat-your-data/master/state_of_the_union.txt', 'keywords': ['putin', 'vladimir', 'ukrainian', 'russia', 'ukraine']}
+
+    Args:
+        batch_size: The number of documents to process in each batch (default ``8``)
+        metadata_key: The name of the key used in the metadata output (default ``keywords``)
+        model: The KeyBERT model to use. (default ``all-MiniLM-L6-v2``)
+    """  # noqa: E501
+
     def __init__(
         self,
         *,
         batch_size: int = 8,
         metadata_key: str = "keywords",
-        embedding_model: str = "all-MiniLM-L6-v2",
+        model: str = "all-MiniLM-L6-v2",
     ):
-        """Extract keywords using `KeyBERT <https://maartengr.github.io/KeyBERT/>`_.
-
-        KeyBERT is a minimal and easy-to-use keyword extraction technique that
-        leverages BERT embeddings to create keywords and keyphrases that are most
-        similar to a document.
-
-        The KeybertKeywordExtractor uses KeyBERT add a list of keywords to a
-        document's metadata.
-
-        Example::
-
-            extractor = KeybertKeywordExtractor()
-            results = extractor.extract_one("lorem ipsum...")
-
-        .. seealso::
-
-            - :mod:`How to use a graph vector store <langchain_community.graph_vectorstores>`
-            - :class:`How to create links between documents <langchain_community.graph_vectorstores.links.Link>`
-
-        How to link Documents on common keywords using Keybert
-        ======================================================
-
-        Preliminaries
-        -------------
-
-        Install the keybert package:
-
-        .. code-block:: bash
-
-            pip install -q langchain_community keybert
-
-        Usage
-        -----
-
-        We load the ``state_of_the_union.txt`` file, chunk it, then for each chunk we
-        extract keyword links and add them to the chunk.
-
-        Using extract_one()
-        ^^^^^^^^^^^^^^^^^^^
-
-        We can use :meth:`extract_one` on a document to get the links and add the links
-        to the document metadata with
-        :meth:`~langchain_community.graph_vectorstores.links.add_links`::
-
-            from langchain_community.document_loaders import TextLoader
-            from langchain_community.graph_vectorstores import CassandraGraphVectorStore
-            from langchain_community.graph_vectorstores.extractors import KeybertLinkExtractor
-            from langchain_community.graph_vectorstores.links import add_links
-            from langchain_text_splitters import CharacterTextSplitter
-
-            loader = TextLoader("state_of_the_union.txt")
-
-            raw_documents = loader.load()
-            text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-
-            documents = text_splitter.split_documents(raw_documents)
-            keyword_extractor = KeybertLinkExtractor()
-
-            for document in documents:
-                links = keyword_extractor.extract_one(document)
-                add_links(document, links)
-
-            print(documents[0].metadata)
-
-        .. code-block:: output
-
-            {'source': 'state_of_the_union.txt', 'links': [Link(kind='kw', direction='bidir', tag='ukraine'), Link(kind='kw', direction='bidir', tag='ukrainian'), Link(kind='kw', direction='bidir', tag='putin'), Link(kind='kw', direction='bidir', tag='vladimir'), Link(kind='kw', direction='bidir', tag='russia')]}
-
-        Using LinkExtractorTransformer
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-        Using the :class:`~langchain_community.graph_vectorstores.extractors.link_extractor_transformer.LinkExtractorTransformer`,
-        we can simplify the link extraction::
-
-            from langchain_community.document_loaders import TextLoader
-            from langchain_community.graph_vectorstores.extractors import (
-                KeybertLinkExtractor,
-                LinkExtractorTransformer,
-            )
-            from langchain_text_splitters import CharacterTextSplitter
-
-            loader = TextLoader("state_of_the_union.txt")
-            raw_documents = loader.load()
-
-            text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-            documents = text_splitter.split_documents(raw_documents)
-
-            transformer = LinkExtractorTransformer([KeybertLinkExtractor()])
-            documents = transformer.transform_documents(documents)
-
-            print(documents[0].metadata)
-
-        .. code-block:: output
-
-            {'source': 'state_of_the_union.txt', 'links': [Link(kind='kw', direction='bidir', tag='ukraine'), Link(kind='kw', direction='bidir', tag='ukrainian'), Link(kind='kw', direction='bidir', tag='putin'), Link(kind='kw', direction='bidir', tag='vladimir'), Link(kind='kw', direction='bidir', tag='russia')]}
-
-        The documents with keyword links can then be added to a :class:`~langchain_community.graph_vectorstores.base.GraphVectorStore`::
-
-            from langchain_community.graph_vectorstores import CassandraGraphVectorStore
-
-            store = CassandraGraphVectorStore.from_documents(documents=documents, embedding=...)
-
-        Args:
-            kind: Kind of links to produce with this extractor.
-            embedding_model: Name of the embedding model to use with KeyBERT.
-            extract_keywords_kwargs: Keyword arguments to pass to KeyBERT's
-                ``extract_keywords`` method.
-        """  # noqa: E501
         try:
             import keybert
 
-            self._kw_model = keybert.KeyBERT(model=embedding_model)
+            self._kw_model = keybert.KeyBERT(model=model)
         except ImportError:
             raise ImportError(
-                "keybert is required for KeybertLinkExtractor. "
+                "keybert is required for the KeybertLinkExtractor. "
                 "Please install it with `pip install keybert`."
             ) from None
 
@@ -135,7 +81,12 @@ class KeybertKeywordExtractor(BaseDocumentTransformer):
     def transform_documents(
         self, documents: Sequence[Document], **kwargs: Any
     ) -> Sequence[Document]:
-        """Extracts properties from documents using KeyBERT."""
+        """Adds keyword metadata to documents using KeyBERT.
+
+        Args:
+            documents: The sequence of documents to transform
+            kwargs: Keyword arguments to pass to KeyBERT. See: https://maartengr.github.io/KeyBERT/api/keybert.html#keybert._model.KeyBERT.extract_keywords
+        """
         for i in range(0, len(documents), self._batch_size):
             batch = documents[i : i + self._batch_size]
             texts = [item.page_content for item in batch]

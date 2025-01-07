@@ -1,5 +1,21 @@
-from langchain_community.retrievers.graph_traversal import GraphTraversalRetriever, TraversalAdapter, Edge
+from typing import Any
+
 from langchain_core.documents import Document
+
+from langchain_community.retrievers.graph_traversal import (
+    Edge,
+    GraphTraversalRetriever,
+    TraversalAdapter,
+)
+
+
+class FakeAdapter(TraversalAdapter):
+    def similarity_search_by_vector(
+        self,
+        **kwargs: Any,
+    ) -> list[Document]:
+        return []
+
 
 def test_get_normalized_outgoing_edges() -> None:
     doc = Document(
@@ -15,9 +31,9 @@ def test_get_normalized_outgoing_edges() -> None:
     )
 
     retriever = GraphTraversalRetriever(
-        store = TraversalAdapter(),
-        edges = ["place", ("outgoing", "incoming"), "boolean", ("number", "string")],
-        use_denormalized_metadata = False,
+        store=FakeAdapter(),
+        edges=["place", ("outgoing", "incoming"), "boolean", ("number", "string")],
+        use_denormalized_metadata=False,
     )
 
     edges = sorted(retriever._get_outgoing_edges(doc=doc))
@@ -47,9 +63,9 @@ def test_get_denormalized_outgoing_edges() -> None:
     )
 
     retriever = GraphTraversalRetriever(
-        store = TraversalAdapter(),
-        edges = ["place", ("outgoing", "incoming"), "boolean", ("number", "string")],
-        use_denormalized_metadata = True,
+        store=FakeAdapter(),
+        edges=["place", ("outgoing", "incoming"), "boolean", ("number", "string")],
+        use_denormalized_metadata=True,
     )
 
     edges = sorted(retriever._get_outgoing_edges(doc=doc))
@@ -62,11 +78,11 @@ def test_get_denormalized_outgoing_edges() -> None:
     assert edges[5] == Edge(key="string", value=42, is_denormalized=False)
 
 
-def test_get_normalized_metadata_filter():
+def test_get_normalized_metadata_filter() -> None:
     retriever = GraphTraversalRetriever(
-        store = TraversalAdapter(),
-        edges = [],
-        use_denormalized_metadata = False,
+        store=FakeAdapter(),
+        edges=[],
+        use_denormalized_metadata=False,
     )
 
     assert retriever._get_metadata_filter(
@@ -81,11 +97,12 @@ def test_get_normalized_metadata_filter():
         edge=Edge(key="place", value="berlin", is_denormalized=False)
     ) == {"place": "berlin"}
 
-def test_get_denormalized_metadata_filter():
+
+def test_get_denormalized_metadata_filter() -> None:
     retriever = GraphTraversalRetriever(
-        store = TraversalAdapter(),
-        edges = [],
-        use_denormalized_metadata = True,
+        store=FakeAdapter(),
+        edges=[],
+        use_denormalized_metadata=True,
     )
 
     assert retriever._get_metadata_filter(

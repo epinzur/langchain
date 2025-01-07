@@ -130,6 +130,7 @@ class TraversalAdapter:
 
 class Edge:
     """Represents an edge to all nodes with the given key/value incoming."""
+
     key: str
     value: Any
     is_denormalized: bool
@@ -140,10 +141,16 @@ class Edge:
         self.is_denormalized = is_denormalized
 
     def __str__(self) -> str:
-        return f"Edge({self.key}->{self.value}, is_denormalized={self.is_denormalized})"
+        return (
+            f"Edge({self.key}->{self.value},"
+            f" is_denormalized={self.is_denormalized})"
+        )
 
     def __repr__(self) -> str:
-        return f"Edge(key={self.key}, value={self.value}, is_denormalized={self.is_denormalized})"
+        return (
+            f"Edge(key={self.key}, value={self.value},"
+            f" is_denormalized={self.is_denormalized})"
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Edge):
@@ -197,13 +204,12 @@ class DocumentCache:
 class GraphTraversalRetriever(BaseRetriever):
     store: TraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
-    _edges: List[Tuple[str,str]] = PrivateAttr(default=[])
+    _edges: List[Tuple[str, str]] = PrivateAttr(default=[])
     start_k: int = Field(default=4)
     max_depth: int = Field(default=4)
     use_denormalized_metadata: bool = Field(default=False)
     denormalized_path_delimiter: str = Field(default=".")
     denormalized_static_value: Any = Field(default=True)
-
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
@@ -424,21 +430,32 @@ class GraphTraversalRetriever(BaseRetriever):
                 value = doc.metadata[source_key]
                 if isinstance(value, BASIC_TYPES):
                     edges.add(Edge(key=target_key, value=value))
-                elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+                elif isinstance(value, Iterable) and not isinstance(
+                    value, (str, bytes)
+                ):
                     if self.use_denormalized_metadata:
-                        warnings.warn("Iterable metadata values are supported as edges in denormalized metadata")
+                        warnings.warn(
+                            "Iterable metadata values are supported as"
+                            " edges in denormalized metadata"
+                        )
                     else:
                         for item in value:
                             if isinstance(item, BASIC_TYPES):
                                 edges.add(Edge(key=target_key, value=item))
             elif self.use_denormalized_metadata:
                 prefix = f"{source_key}{self.denormalized_path_delimiter}"
-                matching_keys: list[str] = [key for key in doc.metadata if key.startswith(prefix)]
+                matching_keys: list[str] = [
+                    key for key in doc.metadata if key.startswith(prefix)
+                ]
                 for matching_key in matching_keys:
                     if doc.metadata[matching_key] == self.denormalized_static_value:
-                        edges.add(Edge(
-                            key=target_key, value=matching_key.removeprefix(prefix), is_denormalized=True,
-                        ))
+                        edges.add(
+                            Edge(
+                                key=target_key,
+                                value=matching_key.removeprefix(prefix),
+                                is_denormalized=True,
+                            )
+                        )
         return edges
 
     def _gather_outgoing_edges(
@@ -487,7 +504,9 @@ class GraphTraversalRetriever(BaseRetriever):
 
         metadata_filter = {} if metadata is None else metadata.copy()
         if edge.is_denormalized:
-            metadata_filter[f"{edge.key}{self.denormalized_path_delimiter}{edge.value}"] = self.denormalized_static_value
+            metadata_filter[
+                f"{edge.key}{self.denormalized_path_delimiter}{edge.value}"
+            ] = self.denormalized_static_value
         else:
             metadata_filter[edge.key] = edge.value
 

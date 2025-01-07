@@ -455,7 +455,9 @@ class MmrHelper:
 
         return selected_doc
 
-    def add_candidates(self, candidates: dict[str, EmbeddedDocument], depth_found: int) -> None:
+    def add_candidates(
+        self, candidates: dict[str, EmbeddedDocument], depth_found: int
+    ) -> None:
         """Add candidates to the consideration set."""
         # Determine the keys to actually include.
         # These are the candidates that aren't already selected
@@ -515,6 +517,7 @@ class MmrHelper:
 
 class Edge:
     """Represents an edge to all nodes with the given key/value incoming."""
+
     key: str
     value: Any
     is_denormalized: bool
@@ -525,10 +528,16 @@ class Edge:
         self.is_denormalized = is_denormalized
 
     def __str__(self) -> str:
-        return f"Edge({self.key}->{self.value}, is_denormalized={self.is_denormalized})"
+        return (
+            f"Edge({self.key}->{self.value},"
+            f" is_denormalized={self.is_denormalized})"
+        )
 
     def __repr__(self) -> str:
-        return f"Edge(key={self.key}, value={self.value}, is_denormalized={self.is_denormalized})"
+        return (
+            f"Edge(key={self.key}, value={self.value},"
+            f" is_denormalized={self.is_denormalized})"
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Edge):
@@ -553,7 +562,7 @@ class Edge:
 class GraphMMRTraversalRetriever(BaseRetriever):
     store: MMRTraversalAdapter
     edges: List[Union[str, Tuple[str, str]]]
-    _edges: List[Tuple[str,str]] = PrivateAttr(default=[])
+    _edges: List[Tuple[str, str]] = PrivateAttr(default=[])
     k: int = Field(default=4)
     depth: int = Field(default=2)
     fetch_k: int = Field(default=100)
@@ -1032,9 +1041,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             docs = self.store.similarity_search_with_embedding_by_vector(
                 embedding=query_embedding,
                 k=k_per_edge or 10,
-                filter=self._get_metadata_filter(
-                    metadata=filter, edge=edge
-                ),
+                filter=self._get_metadata_filter(metadata=filter, edge=edge),
                 **kwargs,
             )
             results.update({EmbeddedDocument(doc=doc) for doc in docs})
@@ -1065,9 +1072,7 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             self.store.asimilarity_search_with_embedding_by_vector(
                 embedding=query_embedding,
                 k=k_per_edge or 10,
-                filter=self._get_metadata_filter(
-                    metadata=filter, edge=edge
-                ),
+                filter=self._get_metadata_filter(metadata=filter, edge=edge),
                 **kwargs,
             )
             for edge in edges
@@ -1079,28 +1084,39 @@ class GraphMMRTraversalRetriever(BaseRetriever):
             results.update({EmbeddedDocument(doc=doc) for doc in docs})
         return results
 
-    def _get_outgoing_edges(self, doc: Document) -> set[Edge]:
+    def _get_outgoing_edges(self, doc: EmbeddedDocument) -> set[Edge]:
         edges = set()
         for source_key, target_key in self._edges:
             if source_key in doc.metadata:
                 value = doc.metadata[source_key]
                 if isinstance(value, BASIC_TYPES):
                     edges.add(Edge(key=target_key, value=value))
-                elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+                elif isinstance(value, Iterable) and not isinstance(
+                    value, (str, bytes)
+                ):
                     if self.use_denormalized_metadata:
-                        warnings.warn("Iterable metadata values are supported as edges in denormalized metadata")
+                        warnings.warn(
+                            "Iterable metadata values are supported as "
+                            "edges in denormalized metadata"
+                        )
                     else:
                         for item in value:
                             if isinstance(item, BASIC_TYPES):
                                 edges.add(Edge(key=target_key, value=item))
             elif self.use_denormalized_metadata:
                 prefix = f"{source_key}{self.denormalized_path_delimiter}"
-                matching_keys: list[str] = [key for key in doc.metadata if key.startswith(prefix)]
+                matching_keys: list[str] = [
+                    key for key in doc.metadata if key.startswith(prefix)
+                ]
                 for matching_key in matching_keys:
                     if doc.metadata[matching_key] == self.denormalized_static_value:
-                        edges.add(Edge(
-                            key=target_key, value=matching_key.removeprefix(prefix), is_denormalized=True,
-                        ))
+                        edges.add(
+                            Edge(
+                                key=target_key,
+                                value=matching_key.removeprefix(prefix),
+                                is_denormalized=True,
+                            )
+                        )
         return edges
 
     def _get_metadata_filter(
@@ -1119,7 +1135,9 @@ class GraphMMRTraversalRetriever(BaseRetriever):
 
         metadata_filter = {} if metadata is None else metadata.copy()
         if edge.is_denormalized:
-            metadata_filter[f"{edge.key}{self.denormalized_path_delimiter}{edge.value}"] = self.denormalized_static_value
+            metadata_filter[
+                f"{edge.key}{self.denormalized_path_delimiter}{edge.value}"
+            ] = self.denormalized_static_value
         else:
             metadata_filter[edge.key] = edge.value
 
